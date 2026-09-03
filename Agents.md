@@ -800,12 +800,12 @@ export type ConflictRecord = {
 | memory/search 性能 | 无约束 | 已修复：`listMemories()` 调用处统一加 limit 约束（handler: 500, tool-registry: 200, orchestrator: 500） | ~~P1~~ |
 | 文件锁实现 | 未描述实现细节 | 已修复：`fs.open(path, O_WRONLY \| O_CREAT \| O_EXCL)` 原子操作 | ~~P2~~ |
 | 日志系统 | 未提及 | 已修复：核心链路（model-adapter, memory-service, orchestrator）迁移到 `logger` | ~~P3~~ |
-| 测试覆盖 | 第 10 节定义了完整测试策略 | 已修复：44 个测试文件，413 passed / 0 skipped，覆盖 builder/validator/differ/conflict-resolver/VectorIndex/Ranker/MemoryService 队列/Auditor、Agent 循环、降级路径、聊天入队到审计写回集成链路、配置 API 请求体验证、提供商目录、上下文压缩、React 设置表单 SSR、记忆检索库/图谱路由和 listen 错误契约测试 | ~~P2~~ |
+| 测试覆盖 | 第 10 节定义了完整测试策略 | 已修复：Phase 0 基线为 50 个 Vitest 文件、473 passed / 0 skipped，另有 6 个 Playwright E2E 全部通过；覆盖 builder/validator/differ/conflict-resolver/VectorIndex/Ranker/MemoryService 队列/Auditor、Agent 循环、降级路径、聊天入队到审计写回集成链路、配置 API、上下文压缩、记忆检索库/图谱路由和 listen 错误契约 | ~~P2~~ |
 | 工具结果分层 | 未定义 | 已修复：`ToolResult` 新增 `content` 字段（给模型读的自然语言），`data` 保持不变（给 UI/日志） | ~~P3~~ |
 | 会话系统提示快照 | 持久化 system 消息 | 已修复：`ChatSessionService.appendSnapshot` 过滤 system 角色消息，恢复时由 Handler 重建 | ~~P2~~ |
 | 聊天 UI 与记忆页面契约回归 | Phase 2 要求多会话 UI 已接入；第 4.9 节要求前端可检索并进入记忆详情 | 已修复：恢复 `/chat`、`ChatInterface` 与 `useChatSession`，首页快捷入口提供“开始对话”并保留顶部导航仅“首页 / 检索库 / 设置”三项；首页搜索统一读取 `data.results`，检索库统一读取 `data.items`；`/memory/[id]` 专用于记忆 ID，话题聚合迁至 `/memory/topic/[topic]` | ~~P0~~ |
 | 提供商配置 | AI 配置仅前端表单 | 已修复：`src/config/providers.json` 声明式目录经 `provider-loader.ts` 做 Zod 校验和读写，`/api/config/ai` 返回 `providerCatalog`，设置页模型/供应商选项由目录驱动并有单测覆盖 | ~~P2~~ |
-| docs 目录未纳入版本控制 | 第 2 节要求文档跟随实现，差异有记录 | 已修复：`.gitignore` 不再忽略 `docs-zh/`，仅继续忽略 `docs-zh/.obsidian/workspace.json` 这类个人编辑器状态；项目文档可进入版本控制 | ~~P2~~ |
+| docs 目录未纳入版本控制 | 第 2 节要求文档跟随实现，差异有记录 | 已修复：`.gitignore` 明确放行 `docs/specs/**`，规范文档可进入版本控制；`docs/` 下其他个人资料和 `docs-zh/.obsidian/workspace.json` 继续忽略 | ~~P2~~ |
 | 降级状态恢复 | 第 4.11 节描述降级但未提恢复 | 已修复：`ModelAdapter.startHealthCheck()` 周期性轮询，恢复后自动退出降级；scheduler setInterval 类型修复 | ~~P1~~ |
 | 记忆创建绕过审计 | 第 4.8 节要求先入队再审计 | 已修复：tool-registry 的 create_memory/update_memory 改为生成 PendingEvent 入队而非直接写库 | ~~P0~~ |
 | MMR 重排 | 第 4.11 节"重排默认采用 MMR" | 已修复：`Ranker.rankWithMMR()` 实现真正的 MMR（α*score - (1-α)*max_sim），用 tags Jaccard 作为文档间相似度，α 默认 0.7；handler.ts 已切换到 rankWithMMR；保留 `rank()` 作为基础多因子加权排序供其他场景使用 | ~~P2~~ |
@@ -840,10 +840,11 @@ export type ConflictRecord = {
 | 更新路径绕过质量闸门 | 旧实现仅新建记忆过质量闸门，update 事件 content 变更直接进审计 | 已修复：`Orchestrator` 更新分支在 `changedFields` 含 `content` 时同样执行向量去重 + 质量闸门（reject → rejected；review → warn 后继续审计 diff/冲突兜底） | ~~P1~~ |
 | 多入口写入无语义去重 | 旧实现仅 ingest 入口有 Jaccard 快筛，chat/listen/tool 等入口无语义去重 | 已修复：`Orchestrator` 统一入口向量语义去重（`VectorIndex.search` cosine ≥ 0.95 判重 → rejected）；一次 embedding 召回 top-K 相似记忆同时服务去重与闸门新颖性上下文（≥0.6 才注入 prompt，省 token） | ~~P1~~ |
 | review 无人工裁决出口 | 无 | 已修复：`Orchestrator.resolveReviewEvent(eventId, action)`（accept 跳闸门直接落盘，避免重新入队死循环；reject 终拒归档）+ `GET/POST /api/audit/review-events` 路由 + API 契约登记 | ~~P2~~ |
+| 产品范围与 LKA-001 目标不一致 | `docs/specs/001-local-knowledge-agent/` 将产品收缩为本地知识整理 Agent，并明确删除聊天、画像、人格 Prompt 和聊天型 MCP/Skills | Phase 0 只完成规范确认和基线修复，范围外功能仍存在；必须在 Phase 1 特征测试与 Phase 4 解耦完成后，按 LKA-001 Phase 5 删除 | P0 |
 
 ### 11.2 渐进式路线图
 
-项目按 Phase 分阶段推进，每个 Phase 在前一阶段稳定后才开始。当前阶段：**Phase 5 检索与质量收口**。
+以下路线图记录原有通用记忆产品建设历史，Phase 0 至 Phase 5 已完成。新的范围收缩工作由 11.3 节的 LKA-001 路线图接管。
 
 ```text
 Phase 0 — 工程健康 [DONE]
@@ -893,7 +894,7 @@ Phase 4 — 测试与质量
   [x] 审计持久化层测试（冲突分级、版本管理）
   [x] 集成测试（端到端：用户输入 → 快轨 → 审计 → 文件写回）
 
-Phase 5 — 检索与质量收口
+Phase 5 — 检索与质量收口 [DONE]
   [x] 多路召回（query-rewriter budget 改写 + query-expansion 合并去重，降级退回单路）
   [x] 注入改为 getMemoriesByIds 精确加载，移除 500 条全量拉取
   [x] 记忆纠错闭环（MemoryCorrectionService + correct_memory 工具 + memory_update 意图路由 + 记错/纠正关键词）
@@ -909,7 +910,35 @@ Phase 5 — 检索与质量收口
   [x] review 人工裁决出口（resolveReviewEvent + GET/POST /api/audit/review-events）
 ```
 
+### 11.3 LKA-001 功能收缩路线图
+
+详细规范位于 `docs/specs/001-local-knowledge-agent/`，当前阶段：**Phase 1 固定保留行为**。
+
+```text
+Phase 0 — 确认范围和建立基线 [DONE]
+  [x] 确认本地知识整理 Agent 的目标与非目标
+  [x] 建立代码量、路由、依赖、测试和检索指标基线
+  [x] 修复移动端会话恢复竞争和图谱 E2E 过期契约
+  [x] format/typecheck/lint/test/eval/build/E2E 全部门禁通过
+
+Phase 1 — 固定保留行为 [NEXT]
+  [ ] 监听到队列的特征测试
+  [ ] 队列到发布的特征测试
+  [ ] 混合检索特征测试
+  [ ] 派生索引重建安全测试
+
+Phase 2 — 显式 KnowledgeAgent 契约
+Phase 3 — 去噪和来源追踪
+Phase 4 — 保留代码解耦
+Phase 5 — 删除范围外功能
+Phase 6 — 主题学习资料生成
+Phase 7 — 用户界面重构
+Phase 8 — 验证和作品集交付
+```
+
 ## 12. 本轮补充记录
+
+- LKA-001 Phase 0 已完成：规范确认、Git 基线、代码规模报告、移动端 hydration 竞争修复、图谱 E2E 更新和全门禁验证；详细结果见 `docs/specs/001-local-knowledge-agent/phase-0-baseline.md`
 
 - 已完成 `ChatHandler` 系统提示拆分：`src/features/chat/system-prompt.ts`
 - 已完成审计报告写入拆分：`src/server/services/audit-report-writer.ts`

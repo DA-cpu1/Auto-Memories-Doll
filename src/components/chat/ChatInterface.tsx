@@ -286,7 +286,11 @@ export default function ChatInterface() {
                 </div>
               </div>
               <div className="flex min-w-0 flex-col gap-2 sm:flex-row sm:items-center">
-                <ChatModeSelector mode={mode} onModeChange={setMode} />
+                <ChatModeSelector
+                  mode={mode}
+                  onModeChange={setMode}
+                  disabled={hydrating || loading}
+                />
                 <div className={`grid gap-2 ${mode === "memory" ? "grid-cols-2" : "grid-cols-1"}`}>
                   {mode === "memory" && (
                     <button

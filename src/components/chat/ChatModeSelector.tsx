@@ -6,6 +6,7 @@ import { ChatMode } from "../../types/api";
 interface ChatModeSelectorProps {
   mode: ChatMode;
   onModeChange: (mode: ChatMode) => void;
+  disabled?: boolean;
 }
 
 /** 12x12 SVG 图标，与项目淡紫金色调保持一致 */
@@ -56,7 +57,7 @@ const Icons = {
   ),
 };
 
-export default function ChatModeSelector({ mode, onModeChange }: ChatModeSelectorProps) {
+export default function ChatModeSelector({ mode, onModeChange, disabled }: ChatModeSelectorProps) {
   const modes: {
     value: ChatMode;
     label: string;
@@ -76,7 +77,9 @@ export default function ChatModeSelector({ mode, onModeChange }: ChatModeSelecto
           <button
             key={value}
             onClick={() => onModeChange(value)}
-            className={`group relative flex min-w-0 flex-col items-center rounded-xl px-2 py-2.5 text-center transition-all duration-300 sm:items-start sm:px-4 sm:text-left ${
+            disabled={disabled}
+            aria-disabled={disabled}
+            className={`group relative flex min-w-0 flex-col items-center rounded-xl px-2 py-2.5 text-center transition-all duration-300 disabled:cursor-wait disabled:opacity-60 sm:items-start sm:px-4 sm:text-left ${
               active
                 ? "bg-surface shadow-sm border border-border-strong"
                 : "bg-transparent border border-transparent hover:bg-surface/60 hover:border-border"

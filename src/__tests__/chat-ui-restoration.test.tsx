@@ -8,6 +8,7 @@ vi.mock("next/navigation", () => ({
 }));
 
 import ChatInterface from "../components/chat/ChatInterface";
+import ChatModeSelector from "../components/chat/ChatModeSelector";
 import TopNavbar from "../components/common/TopNavbar";
 import SettingsLayout from "../components/settings/SettingsLayout";
 import DashboardPage from "../app/(main)/page";
@@ -28,6 +29,14 @@ describe("chat UI restoration", () => {
     expect(html).toContain("与你的 AI 伙伴对话");
     expect(html).toContain("新会话");
     expect(html).toContain("正在恢复会话");
+  });
+
+  it("disables mode changes while session state is hydrating", () => {
+    const html = renderToStaticMarkup(
+      <ChatModeSelector mode="chat" onModeChange={() => undefined} disabled />,
+    );
+
+    expect(html.match(/aria-disabled="true"/g)).toHaveLength(3);
   });
 
   it("exposes a labeled home entry for the chat route", () => {
