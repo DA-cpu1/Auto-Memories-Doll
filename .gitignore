@@ -24,7 +24,10 @@ memory-root/
 *.db-shm
 
 # 个人文档和笔记
-docs/
+docs/*
+!docs/.gitkeep
+!docs/specs/
+!docs/specs/**
 notes/
 docs-zh/.obsidian/workspace.json
 *.private.md
