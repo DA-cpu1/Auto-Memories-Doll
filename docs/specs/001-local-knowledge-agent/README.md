@@ -5,7 +5,7 @@
 | 字段     | 内容                                                            |
 | -------- | --------------------------------------------------------------- |
 | 规范编号 | `LKA-001`                                                       |
-| 状态     | 已确认，Phase 0 完成                                            |
+| 状态     | 已确认，Phase 1 完成                                            |
 | 创建日期 | 2026-09-03                                                      |
 | 目标产品 | 本地知识整理 Agent                                              |
 | Git 基线 | `main`，改造前暂存为 `pre-sdd-knowledge-agent-scope-2026-09-03` |
@@ -23,6 +23,7 @@
 3. [design.md](./design.md)：完整架构、数据模型、处理链路、接口和技术栈。
 4. [tasks.md](./tasks.md)：按依赖顺序排列的实施与验证任务。
 5. [phase-0-baseline.md](./phase-0-baseline.md)：改造前代码、测试、检索和运行环境基线。
+6. [phase-1-characterization.md](./phase-1-characterization.md)：保留链路的真实持久化特征测试报告。
 
 ## 一句话定位
 

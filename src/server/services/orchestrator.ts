@@ -791,7 +791,7 @@ export class Orchestrator {
     candidate: MemoryRecord,
     cards: ExtractedCard[],
   ): Promise<string> {
-    const hash = sourceHashOf(candidate.content);
+    const hash = candidate.evidence?.sourceHash ?? sourceHashOf(candidate.content);
     let anchorId = "";
     for (let i = 0; i < cards.length; i++) {
       const card = cards[i];
