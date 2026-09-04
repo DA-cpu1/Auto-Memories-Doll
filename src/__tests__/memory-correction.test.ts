@@ -5,8 +5,8 @@ const mocks = vi.hoisted(() => ({
   degraded: false,
 }));
 
-vi.mock("../lib/ai/model-adapter", () => ({
-  ModelAdapter: {
+vi.mock("../lib/ai/knowledge-model-adapter", () => ({
+  KnowledgeModelAdapter: {
     generate: mocks.generate,
     get isDegradedMode() {
       return mocks.degraded;

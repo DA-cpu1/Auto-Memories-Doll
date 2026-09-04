@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { ConfigService } from "../../../../server/services/config-service";
+import { KnowledgeConfigService } from "../../../../server/services/knowledge-config-service";
 import { restartToolDirWatcher } from "../../../../server/watchers/tool-dir-watcher";
 import { TOOL_PRESETS } from "../../../../config/tool-presets";
 import { logger } from "../../../../lib/logger";
@@ -10,7 +10,7 @@ import { toolSourceCreateSchema } from "../../../../lib/validation";
  * 返回所有监听源 + 预设 + 活跃状态
  */
 export async function GET() {
-  const service = new ConfigService();
+  const service = new KnowledgeConfigService();
   try {
     const sources = service.listToolSources();
     return NextResponse.json({ sources, presets: TOOL_PRESETS });
@@ -37,7 +37,7 @@ export async function POST(request: NextRequest) {
   }
   const { name, toolType, path, filePattern, enabled, topic, description } = parsed.data;
 
-  const service = new ConfigService();
+  const service = new KnowledgeConfigService();
   try {
     const created = service.createToolSource({
       name,

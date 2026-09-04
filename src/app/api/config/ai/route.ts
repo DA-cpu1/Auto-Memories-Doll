@@ -1,10 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
-import { ConfigService } from "../../../../server/services/config-service";
+import { KnowledgeConfigService } from "../../../../server/services/knowledge-config-service";
 import { aiConfigSchema } from "../../../../lib/validation";
 import { loadProviderCatalog } from "../../../../config/provider-loader";
 
 export async function GET() {
-  const service = new ConfigService();
+  const service = new KnowledgeConfigService();
   try {
     const config = service.getAiConfig() || service.getDefaultAiConfig();
     // 脱敏：前端永远不返回真实 apiKey（共享与 embedding 专属都脱敏）
@@ -39,7 +39,7 @@ function resolveMaskedKey(
 }
 
 export async function POST(request: NextRequest) {
-  const service = new ConfigService();
+  const service = new KnowledgeConfigService();
   try {
     const body = await request.json();
     // 如果前端传的是脱敏后的值，合并数据库中已有的真实 apiKey

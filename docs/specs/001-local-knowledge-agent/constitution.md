@@ -67,7 +67,7 @@
 
 ## 7. 显式模型边界和可见降级
 
-- 所有 LLM 和 Embedding 请求必须经过 `ModelAdapter` 或其后继接口。
+- 所有知识加工 LLM 和 Embedding 请求必须经过不含聊天事件类型的 `KnowledgeModelAdapter`。
 - 提供商差异必须封装在 provider 边界内部。
 - LLM 不可用时，系统仍必须支持发现文件、解析、查看既有资料和关键词检索。
 - Embedding 不可用时，系统必须降级到关键词和元数据检索。

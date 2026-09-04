@@ -1,5 +1,5 @@
 import { getAvailableTopics } from "../../config/topics.config";
-import { ModelAdapter } from "../../lib/ai/model-adapter";
+import { KnowledgeModelAdapter } from "../../lib/ai/knowledge-model-adapter";
 import { logger } from "../../lib/logger";
 
 export type TopicClassificationInput = {
@@ -26,12 +26,12 @@ export class TopicClassificationService {
       ? input.suggestedTopic
       : "uncategorized";
 
-    if (ModelAdapter.isDegradedMode) {
+    if (KnowledgeModelAdapter.isDegradedMode) {
       return this.ruleFallback(fallbackTopic, "模型降级，使用规则话题");
     }
 
     try {
-      const response = await ModelAdapter.generate(
+      const response = await KnowledgeModelAdapter.generate(
         this.buildPrompt(input, [...allowedTopics]),
         "standard",
       );

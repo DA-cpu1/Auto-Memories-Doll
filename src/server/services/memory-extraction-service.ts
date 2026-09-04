@@ -1,5 +1,5 @@
 import { MemoryRecord } from "../../types/memory";
-import { ModelAdapter } from "../../lib/ai/model-adapter";
+import { KnowledgeModelAdapter } from "../../lib/ai/knowledge-model-adapter";
 import { SimilarMemoryHint } from "./quality-filter-service";
 import { logger } from "../../lib/logger";
 
@@ -33,7 +33,7 @@ export class MemoryExtractionService {
     similar: SimilarMemoryHint[] = [],
   ): Promise<ExtractedCard[] | null> {
     // 模型降级时无法改写 → 转人工（与质量闸门同一 fail-closed 策略）
-    if (ModelAdapter.isDegradedMode) {
+    if (KnowledgeModelAdapter.isDegradedMode) {
       return null;
     }
 
@@ -41,7 +41,7 @@ export class MemoryExtractionService {
 
     for (let attempt = 1; attempt <= MAX_PARSE_ATTEMPTS; attempt++) {
       try {
-        const response = await ModelAdapter.generate(prompt, "flagship");
+        const response = await KnowledgeModelAdapter.generate(prompt, "flagship");
         const cards = this.parseCards(response.content, candidate.content);
         if (cards) return cards;
         logger.quality.warn("抽取输出非标准 JSON，重试", {

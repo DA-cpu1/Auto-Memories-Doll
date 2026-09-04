@@ -1,13 +1,13 @@
 import { createOpenAI } from "@ai-sdk/openai";
 import { createAnthropic } from "@ai-sdk/anthropic";
 import { LanguageModel } from "ai";
-import { ConfigService } from "../../server/services/config-service";
+import { KnowledgeConfigService } from "../../server/services/knowledge-config-service";
 import { AiConfig, ModelTierConfig } from "../../types/config";
 import { AiServiceError } from "../errors";
-import type { ModelType } from "./model-adapter";
+import type { ModelType } from "./knowledge-model";
 
 function getConfig(): AiConfig {
-  const service = new ConfigService();
+  const service = new KnowledgeConfigService();
   try {
     return service.getAiConfig() || service.getDefaultAiConfig();
   } finally {

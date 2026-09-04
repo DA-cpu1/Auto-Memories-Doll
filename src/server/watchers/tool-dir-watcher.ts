@@ -2,7 +2,7 @@ import { watch, FSWatcher } from "chokidar";
 import { readFile, readdir } from "fs/promises";
 import { statSync } from "fs";
 import { isAbsolute, join, relative, resolve } from "path";
-import { ConfigService } from "../services/config-service";
+import { KnowledgeConfigService } from "../services/knowledge-config-service";
 import { ToolWatchSource } from "../../types/config";
 import { isRecentWrite } from "../../lib/storage/write-tracker";
 import { logger } from "../../lib/logger";
@@ -62,7 +62,7 @@ export async function startToolDirWatcher(): Promise<void> {
   // 避免同进程对同一目录开两个监听
   if (entries.length > 0 || globalStore.__amdToolDirStarted) return;
 
-  const configService = new ConfigService();
+  const configService = new KnowledgeConfigService();
   let sources: ToolWatchSource[];
   try {
     const configuredSources = configService.listToolSources();

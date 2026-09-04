@@ -4,6 +4,7 @@ import { AiEvent } from "../lib/ai/ai-events";
 
 const aiMock = vi.hoisted(() => ({
   generateText: vi.fn(),
+  embed: vi.fn(),
 }));
 
 const providerMock = vi.hoisted(() => ({
@@ -41,16 +42,21 @@ const configMock = vi.hoisted(() => ({
 }));
 
 vi.mock("ai", () => ({
-  embed: vi.fn(),
+  embed: aiMock.embed,
   generateText: aiMock.generateText,
+}));
+
+vi.mock("../lib/ai/provider", () => ({
+  createLanguageModel: vi.fn(() => ({})),
+  createEmbeddingModel: vi.fn(() => ({})),
 }));
 
 vi.mock("../lib/ai/openai-provider", () => ({
   OpenAIProvider: vi.fn(() => providerMock),
 }));
 
-vi.mock("../server/services/config-service", () => ({
-  ConfigService: vi.fn(() => ({
+vi.mock("../server/services/knowledge-config-service", () => ({
+  KnowledgeConfigService: vi.fn(() => ({
     getAiConfig: vi.fn(() => configMock.config),
     getDefaultAiConfig: vi.fn(() => configMock.config),
     close: vi.fn(),
@@ -119,7 +125,7 @@ describe("ModelAdapter degradation", () => {
   it("keeps LLM degradation after a later embedding success", async () => {
     configMock.config.apiKey = "test-key";
     aiMock.generateText.mockRejectedValueOnce(new Error("llm down"));
-    providerMock.generateEmbedding.mockResolvedValueOnce([0.1, 0.2]);
+    aiMock.embed.mockResolvedValueOnce({ embedding: [0.1, 0.2] });
 
     const llmResult = await ModelAdapter.generate("remember this", "standard");
     expect(llmResult.finishReason).toBe("degraded");
@@ -137,7 +143,7 @@ describe("ModelAdapter degradation", () => {
     aiMock.generateText
       .mockRejectedValueOnce(new Error("initial llm down"))
       .mockRejectedValueOnce(new Error("llm still down"));
-    providerMock.generateEmbedding.mockResolvedValue([0.1, 0.2]);
+    aiMock.embed.mockResolvedValue({ embedding: [0.1, 0.2] });
 
     await ModelAdapter.generate("remember this", "standard");
     expect(ModelAdapter.isDegradedMode).toBe(true);
@@ -145,7 +151,7 @@ describe("ModelAdapter degradation", () => {
     ModelAdapter.startHealthCheck();
     await vi.advanceTimersByTimeAsync(30000);
 
-    expect(providerMock.generateEmbedding).toHaveBeenCalledWith("health-check");
+    expect(aiMock.embed).toHaveBeenCalledWith(expect.objectContaining({ value: "health-check" }));
     expect(aiMock.generateText).toHaveBeenCalledTimes(2);
     expect(ModelAdapter.isDegradedMode).toBe(true);
   });

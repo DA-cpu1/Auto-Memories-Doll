@@ -1,10 +1,10 @@
-import { ModelAdapter } from "../ai/model-adapter";
+import { KnowledgeModelAdapter } from "../ai/knowledge-model-adapter";
 import { apiConfig } from "../../config/api.config";
 import { VectorRecord } from "../../types/memory";
 import { getCurrentTime } from "../utils/date";
 
 export const generateEmbedding = async (text: string): Promise<number[]> => {
-  const response = await ModelAdapter.generateEmbedding(text);
+  const response = await KnowledgeModelAdapter.generateEmbedding(text);
   return response.embedding;
 };
 

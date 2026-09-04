@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { ConfigService } from "../../../../server/services/config-service";
+import { KnowledgeConfigService } from "../../../../server/services/knowledge-config-service";
 import { StorageMigrationService } from "../../../../server/services/storage-migration-service";
 import { getDatabasePath } from "../../../../lib/storage/path-resolver";
 import { logger } from "../../../../lib/logger";
@@ -10,7 +10,7 @@ import { storageConfigPreviewSchema, storageConfigUpdateSchema } from "../../../
  * 返回当前存储配置：笔记路径 + 数据库路径
  */
 export async function GET() {
-  const service = new ConfigService();
+  const service = new KnowledgeConfigService();
   try {
     const config = service.getStorageConfig() || service.getDefaultStorageConfig();
     return NextResponse.json({

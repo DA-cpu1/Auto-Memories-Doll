@@ -4,8 +4,8 @@ const { embeddingMock } = vi.hoisted(() => ({
   embeddingMock: vi.fn(),
 }));
 
-vi.mock("../lib/ai/model-adapter", () => ({
-  ModelAdapter: {
+vi.mock("../lib/ai/knowledge-model-adapter", () => ({
+  KnowledgeModelAdapter: {
     generateEmbedding: embeddingMock,
   },
 }));

@@ -3,7 +3,8 @@ import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node
 import { dirname, join } from "node:path";
 import { closeDatabase } from "../lib/storage/database";
 import { getNotePath, invalidatePathCache } from "../lib/storage/path-resolver";
-import { ModelAdapter, type LlmResponse } from "../lib/ai/model-adapter";
+import { KnowledgeModelAdapter } from "../lib/ai/knowledge-model-adapter";
+import type { LlmResponse } from "../lib/ai/knowledge-model";
 import { ingestMarkdownFile, scanMemoryRoot } from "../server/watchers/file-watcher";
 import { MemoryService } from "../server/services/memory-service";
 import { Orchestrator } from "../server/services/orchestrator";
@@ -32,13 +33,13 @@ function resetStorage(): void {
 }
 
 function installAcceptingModelBoundary(): void {
-  vi.spyOn(ModelAdapter, "isDegradedMode", "get").mockReturnValue(false);
-  vi.spyOn(ModelAdapter, "generateEmbedding").mockResolvedValue({
+  vi.spyOn(KnowledgeModelAdapter, "isDegradedMode", "get").mockReturnValue(false);
+  vi.spyOn(KnowledgeModelAdapter, "generateEmbedding").mockResolvedValue({
     embedding: [1, 0, 0],
     model: "characterization-embedding",
     timestamp: "2026-09-03T00:00:00.000Z",
   });
-  vi.spyOn(ModelAdapter, "generate").mockImplementation(async (prompt) => {
+  vi.spyOn(KnowledgeModelAdapter, "generate").mockImplementation(async (prompt) => {
     if (prompt.includes("知识库话题分类器")) {
       return llmResponse('{"topic":"learning","confidence":0.95,"reason":"技术学习资料"}');
     }

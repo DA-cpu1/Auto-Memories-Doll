@@ -1,13 +1,18 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
-// Mock ModelAdapter to avoid real AI calls
+const knowledgeModelMock = vi.hoisted(() => ({
+  generate: vi.fn(),
+  generateStream: vi.fn(),
+  isDegradedMode: false,
+}));
+
+// Legacy route optimizer and retained knowledge jobs share the same controllable fake.
 vi.mock("../lib/ai/model-adapter", () => ({
-  ModelAdapter: {
-    generate: vi.fn(),
-    generateStream: vi.fn(),
-    isDegradedMode: false,
-  },
+  ModelAdapter: knowledgeModelMock,
   ModelType: { flagship: "flagship", standard: "standard", budget: "budget" },
+}));
+vi.mock("../lib/ai/knowledge-model-adapter", () => ({
+  KnowledgeModelAdapter: knowledgeModelMock,
 }));
 
 // Mock WikiGraph
@@ -18,15 +23,6 @@ vi.mock("../lib/graph/wiki-graph", () => ({
     addWikilinkToFile: vi.fn().mockResolvedValue(undefined),
     invalidateCache: vi.fn(),
   })),
-}));
-
-// Mock ProfileUpdater
-vi.mock("../server/services/profile-updater", () => ({
-  ProfileUpdater: {
-    getInstance: vi.fn().mockReturnValue({
-      runAnalysisWithFlagship: vi.fn().mockResolvedValue(undefined),
-    }),
-  },
 }));
 
 // Mock TaskRouter
@@ -67,7 +63,6 @@ import { ContradictionDetector } from "../server/orchestrators/contradiction-det
 import { LinkSupplementer } from "../server/orchestrators/link-supplementer";
 import { RouteOptimizer } from "../server/orchestrators/route-optimizer";
 import { DailyReporter } from "../server/orchestrators/daily-reporter";
-import { ProfileUpdater } from "../server/services/profile-updater";
 import { MemoryRecord } from "../types/memory";
 
 function makeMemory(
@@ -140,19 +135,13 @@ describe("NightlyOrchestrator", () => {
     // 子任务返回空结果（非 null，因为子任务仍然执行了只是返回空）
     expect(report.contradiction?.contradictions).toEqual([]);
     expect(report.links?.addedCount).toBe(0);
-    expect(report.routing?.suggestions).toEqual([]);
+    expect(report).not.toHaveProperty("routing");
   });
 
-  it("should skip flagship profile analysis when model adapter is degraded", async () => {
-    (ModelAdapter as any).isDegradedMode = true;
-    const profileUpdater = (ProfileUpdater.getInstance as any)();
-    profileUpdater.runAnalysisWithFlagship.mockClear();
-
+  it("does not expose profile or chat-routing work in the nightly report", async () => {
     const report = await orchestrator.run();
-
-    expect(profileUpdater.runAnalysisWithFlagship).not.toHaveBeenCalled();
-    expect(report.allSucceeded).toBe(true);
-    expect(report.errors).toEqual([]);
+    expect(report).not.toHaveProperty("profile");
+    expect(report).not.toHaveProperty("routing");
   });
 
   afterEach(() => {
@@ -517,17 +506,6 @@ describe("DailyReporter", () => {
         addedCount: 1,
         failedCount: 0,
       },
-      routing: {
-        suggestions: [
-          {
-            taskCategory: "summarization" as any,
-            currentModel: "budget" as any,
-            suggestedModel: "standard" as any,
-            reason: "质量提升",
-          },
-        ],
-        appliedCount: 1,
-      },
       allSucceeded: true,
       errors: [],
     };
@@ -540,7 +518,7 @@ describe("DailyReporter", () => {
     expect(content).toContain("2026-08-06");
     expect(content).toContain("React 19");
     expect(content).toContain("React 18");
-    expect(content).toContain("summarization");
+    expect(content).not.toContain("路由表优化");
     expect(content).toContain("高危");
     expect(content).toContain("Next.js");
   });
@@ -554,7 +532,6 @@ describe("DailyReporter", () => {
       todaysMemoryCount: 0,
       contradiction: null,
       links: null,
-      routing: null,
       allSucceeded: true,
       errors: [],
     };
@@ -564,7 +541,7 @@ describe("DailyReporter", () => {
     const content = fs.readFileSync(filePath, "utf-8");
     expect(content).toContain("未发现知识矛盾");
     expect(content).toContain("未发现遗漏的链接");
-    expect(content).toContain("无需调整");
+    expect(content).not.toContain("路由表优化");
   });
 
   it("should include errors section when there are errors", async () => {
@@ -576,15 +553,14 @@ describe("DailyReporter", () => {
       todaysMemoryCount: 1,
       contradiction: null,
       links: null,
-      routing: null,
       allSucceeded: false,
-      errors: ["矛盾检测失败: AI 不可用", "画像更新失败: 超时"],
+      errors: ["矛盾检测失败: AI 不可用", "wikilink 补充失败: 超时"],
     };
 
     const filePath = await reporter.write(report);
     const fs = await import("fs");
     const content = fs.readFileSync(filePath, "utf-8");
     expect(content).toContain("矛盾检测失败");
-    expect(content).toContain("画像更新失败");
+    expect(content).toContain("wikilink 补充失败");
   });
 });

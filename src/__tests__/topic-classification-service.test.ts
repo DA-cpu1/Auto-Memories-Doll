@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-vi.mock("../lib/ai/model-adapter", () => ({
-  ModelAdapter: {
+vi.mock("../lib/ai/knowledge-model-adapter", () => ({
+  KnowledgeModelAdapter: {
     generate: vi.fn(),
     isDegradedMode: false,
   },
@@ -25,7 +25,8 @@ vi.mock("../config/topics.config", async () => {
   };
 });
 
-import { ModelAdapter } from "../lib/ai/model-adapter";
+import { KnowledgeModelAdapter } from "../lib/ai/knowledge-model-adapter";
+const ModelAdapter = KnowledgeModelAdapter;
 import { TopicClassificationService } from "../server/services/topic-classification-service";
 
 const llmReply = (json: unknown) => ({
@@ -40,7 +41,7 @@ describe("TopicClassificationService", () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
-    (ModelAdapter as any).isDegradedMode = false;
+    (KnowledgeModelAdapter as any).isDegradedMode = false;
     service = new TopicClassificationService();
   });
 

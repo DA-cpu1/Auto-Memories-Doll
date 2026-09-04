@@ -7,7 +7,7 @@ import { QualityFilterService, SimilarMemoryHint } from "./quality-filter-servic
 import { MemoryExtractionService, ExtractedCard } from "./memory-extraction-service";
 import { MemoryCardHygieneService } from "./memory-card-hygiene-service";
 import { TopicClassificationService } from "./topic-classification-service";
-import { ModelAdapter } from "../../lib/ai/model-adapter";
+import { KnowledgeModelAdapter } from "../../lib/ai/knowledge-model-adapter";
 import { createHash } from "crypto";
 import { MemoryRecord, MemoryKind, MemoryEvidence, PendingEvent } from "../../types/memory";
 import { buildMemoryRecord, buildPendingEvent } from "../../lib/memory/builder";
@@ -253,7 +253,7 @@ export class Orchestrator {
       }
 
       if (candidate.tags.includes(FULL_REBUILD_TAG)) {
-        if (ModelAdapter.isDegradedMode) return;
+        if (KnowledgeModelAdapter.isDegradedMode) return;
         const staged = await this.stageExistingMemoryOptimization(existing, false);
         if (!staged) return;
         event.status = "done";
@@ -616,10 +616,10 @@ export class Orchestrator {
     content: string,
     excludeMemoryId?: string,
   ): Promise<SimilarHit[] | null> {
-    if (ModelAdapter.isDegradedMode || !content) return null;
+    if (KnowledgeModelAdapter.isDegradedMode || !content) return null;
 
     try {
-      const { embedding } = await ModelAdapter.generateEmbedding(content);
+      const { embedding } = await KnowledgeModelAdapter.generateEmbedding(content);
       const vectorIndex = new VectorIndex();
       try {
         return vectorIndex

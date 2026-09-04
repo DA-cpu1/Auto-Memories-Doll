@@ -13,7 +13,7 @@ import { parseMemoryFromText } from "../../lib/storage/markdown-parser";
 import { parseSourceRevisionEvent } from "../../lib/source/source-revision";
 import { parseSession, ParsedSession } from "../../lib/tools/session-parser";
 import { logger } from "../../lib/logger";
-import { ModelAdapter } from "../../lib/ai/model-adapter";
+import { KnowledgeModelAdapter } from "../../lib/ai/knowledge-model-adapter";
 import type { AgentProgressEvent, AgentProgressOutcome, AgentStage } from "../../types/agent";
 import type { ToolWatchSource } from "../../types/config";
 import type {
@@ -818,7 +818,7 @@ export class KnowledgeAgent {
       errorCode: error ? "SOURCE_PROCESSING_FAILED" : undefined,
       error: error instanceof Error ? error.message : error ? String(error) : undefined,
       retryable: stage === "failed_retryable",
-      degradedCapabilities: ModelAdapter.getDegradedCapabilities(),
+      degradedCapabilities: KnowledgeModelAdapter.getDegradedCapabilities(),
     };
     this.db
       .prepare(

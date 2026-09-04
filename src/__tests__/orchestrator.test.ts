@@ -141,9 +141,9 @@ vi.mock("../lib/vector/generator", () => ({
   ),
 }));
 
-// ── mock: model-adapter（recallSimilarMemories 依赖） ──
-vi.mock("../lib/ai/model-adapter", () => ({
-  ModelAdapter: {
+// ── mock: knowledge model boundary（recallSimilarMemories 依赖） ──
+vi.mock("../lib/ai/knowledge-model-adapter", () => ({
+  KnowledgeModelAdapter: {
     isDegradedMode: false,
     generateEmbedding: vi.fn(() =>
       Promise.resolve({ embedding: [0.1], model: "test", timestamp: "2026-01-01" }),
@@ -621,8 +621,8 @@ describe("Orchestrator", () => {
       memoryServiceStub.getPendingEvents.mockReturnValue([event]);
       memoryServiceStub.getMemory.mockReturnValue(null);
 
-      const modelAdapter = await import("../lib/ai/model-adapter");
-      vi.mocked(modelAdapter.ModelAdapter.generateEmbedding).mockRejectedValueOnce(
+      const modelAdapter = await import("../lib/ai/knowledge-model-adapter");
+      vi.mocked(modelAdapter.KnowledgeModelAdapter.generateEmbedding).mockRejectedValueOnce(
         new Error("embedding down"),
       );
 
@@ -1064,8 +1064,8 @@ describe("Orchestrator", () => {
       memoryServiceStub.getMemory.mockReturnValue(builderMock.memoryRecord);
       memoryServiceStub.listMemories.mockReturnValue([]);
 
-      const modelAdapter = await import("../lib/ai/model-adapter");
-      vi.mocked(modelAdapter.ModelAdapter.generateEmbedding).mockRejectedValueOnce(
+      const modelAdapter = await import("../lib/ai/knowledge-model-adapter");
+      vi.mocked(modelAdapter.KnowledgeModelAdapter.generateEmbedding).mockRejectedValueOnce(
         new Error("embedding down"),
       );
 

@@ -1,8 +1,7 @@
 import { promises as fs, existsSync } from "fs";
 import { join, resolve, isAbsolute } from "path";
-import { ConfigService } from "./config-service";
+import { KnowledgeConfigService } from "./knowledge-config-service";
 import { invalidatePathCache, getMemoryRoot } from "../../lib/storage/path-resolver";
-import { PromptCache } from "../../lib/prompt/cache";
 import { stopFileWatcher, startFileWatcher } from "../watchers/file-watcher";
 import { logger } from "../../lib/logger";
 
@@ -16,7 +15,6 @@ import { logger } from "../../lib/logger";
  * 4. 更新 storage config
  * 5. invalidatePathCache（让后续 getMemoryRoot() 读取新值）
  * 6. 重启 FileWatcher 监听新路径
- * 7. 失效 PromptCache（profile.md 路径已变）
  *
  * 注意：数据库文件（memory.db*）始终留在 env.MEMORY_ROOT，不参与迁移。
  */
@@ -59,7 +57,7 @@ export class StorageMigrationService {
       }
 
       // 4. 更新 storage config
-      const configService = new ConfigService();
+      const configService = new KnowledgeConfigService();
       try {
         configService.setStorageConfig({
           notesPath: newNotesPath,
@@ -71,9 +69,6 @@ export class StorageMigrationService {
 
       // 5. 失效路径缓存
       invalidatePathCache();
-      // 6. 失效 PromptCache（profile.md 路径已变）
-      PromptCache.getInstance().invalidateAll();
-
       logger.storage.info("[StorageMigration] 路径迁移完成", { newPath: absoluteNewPath });
     } finally {
       // 7. 重启 FileWatcher（监听新路径）

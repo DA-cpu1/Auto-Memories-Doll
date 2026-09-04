@@ -120,6 +120,29 @@ vi.mock("../lib/ai/model-adapter", () => ({
   },
 }));
 
+vi.mock("../lib/ai/knowledge-model-adapter", () => ({
+  KnowledgeModelAdapter: {
+    isDegradedMode: false,
+    generateEmbedding: vi.fn(() =>
+      Promise.resolve({ embedding: [0.1], model: "test", timestamp: "2026-01-01" }),
+    ),
+    generate: vi.fn(() =>
+      Promise.resolve({
+        content: JSON.stringify({
+          memories: [
+            {
+              title: "Pipeline memory",
+              summary: "pipeline summary",
+              content: "remember pipeline content",
+              tags: ["pipeline"],
+            },
+          ],
+        }),
+      }),
+    ),
+  },
+}));
+
 vi.mock("../lib/vector/index", () => ({
   VectorIndex: vi.fn(() => ({
     create: vi.fn(() => Promise.resolve()),

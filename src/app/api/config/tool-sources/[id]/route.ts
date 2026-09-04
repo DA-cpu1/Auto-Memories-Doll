@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
-import { ConfigService } from "../../../../../server/services/config-service";
+import { KnowledgeConfigService } from "../../../../../server/services/knowledge-config-service";
 import { restartToolDirWatcher } from "../../../../../server/watchers/tool-dir-watcher";
 import { logger } from "../../../../../lib/logger";
 import { toolSourceUpdateSchema } from "../../../../../lib/validation";
@@ -35,7 +35,7 @@ export async function PUT(request: NextRequest, { params }: { params: { id: stri
     return NextResponse.json({ error: parsed.error.issues[0].message }, { status: 400 });
   }
 
-  const service = new ConfigService();
+  const service = new KnowledgeConfigService();
   try {
     const updated = service.updateToolSource(params.id, parsed.data);
     if (!updated) {
@@ -60,7 +60,7 @@ export async function DELETE(_request: NextRequest, { params }: { params: { id: 
   const err = validateId(params);
   if (err) return err;
 
-  const service = new ConfigService();
+  const service = new KnowledgeConfigService();
   try {
     const deleted = service.deleteToolSource(params.id);
     if (!deleted) {

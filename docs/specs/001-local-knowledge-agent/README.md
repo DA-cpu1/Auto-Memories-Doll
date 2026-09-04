@@ -5,7 +5,7 @@
 | 字段     | 内容                                                            |
 | -------- | --------------------------------------------------------------- |
 | 规范编号 | `LKA-001`                                                       |
-| 状态     | 已确认，Phase 2 完成                                            |
+| 状态     | 已确认，Phase 2、Phase 4 完成                                   |
 | 创建日期 | 2026-09-03                                                      |
 | 目标产品 | 本地知识整理 Agent                                              |
 | Git 基线 | `main`，改造前暂存为 `pre-sdd-knowledge-agent-scope-2026-09-03` |
@@ -25,6 +25,7 @@
 5. [phase-0-baseline.md](./phase-0-baseline.md)：改造前代码、测试、检索和运行环境基线。
 6. [phase-1-characterization.md](./phase-1-characterization.md)：保留链路的真实持久化特征测试报告。
 7. [phase-2-knowledge-agent.md](./phase-2-knowledge-agent.md)：统一来源版本、状态机和显式 Agent 编排报告。
+8. [phase-4-decoupling.md](./phase-4-decoupling.md)：保留代码与聊天、画像、Prompt、MCP/Skills 的解耦报告。
 
 ## 一句话定位
 
@@ -57,7 +58,7 @@
 
 ### 不得误删
 
-- `ModelAdapter`：知识提取、主题分类、质量检查和 Embedding 仍然依赖模型边界。
+- `KnowledgeModelAdapter`：知识提取、主题分类、质量检查和 Embedding 仍然依赖独立模型边界。
 - 审计队列：模型生成内容不得绕过质量审查直接落盘。
 - 降级机制：没有模型时仍需支持本地解析、浏览和关键词检索。
 - 来源追踪：每个知识单元必须能追溯到原始文件或会话。

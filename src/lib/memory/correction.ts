@@ -1,4 +1,4 @@
-import { ModelAdapter } from "../ai/model-adapter";
+import { KnowledgeModelAdapter } from "../ai/knowledge-model-adapter";
 import type { MemoryService } from "../../server/services/memory-service";
 import type { VectorRetriever } from "../vector/retriever";
 import type { MemoryRecord } from "../../types/memory";
@@ -64,7 +64,7 @@ export class MemoryCorrectionService {
     }
 
     // 第 2 步：模型降级时拒绝改写（兜底文案会污染记忆）
-    if (ModelAdapter.isDegradedMode) {
+    if (KnowledgeModelAdapter.isDegradedMode) {
       return { success: false, error: "模型当前不可用，无法执行纠错改写，请稍后重试" };
     }
 
@@ -73,7 +73,7 @@ export class MemoryCorrectionService {
     //（融合要求不依赖模型自觉，由 isAppendLikeRewrite 结构判定兜底）。
     let rewrite: LlmRewrite;
     try {
-      let response = await ModelAdapter.generate(
+      let response = await KnowledgeModelAdapter.generate(
         buildCorrectionPrompt(target, instruction),
         "budget",
       );
@@ -84,7 +84,7 @@ export class MemoryCorrectionService {
 
       if (rewrite.content && isAppendLikeRewrite(target.content, rewrite.content)) {
         logger.memory.warn("改写结果为末尾追加式，带反馈重试", { memoryId: target.id });
-        response = await ModelAdapter.generate(
+        response = await KnowledgeModelAdapter.generate(
           buildCorrectionPrompt(target, instruction, APPEND_REJECT_FEEDBACK),
           "budget",
         );

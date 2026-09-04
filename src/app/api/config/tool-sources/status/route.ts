@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { ConfigService } from "../../../../../server/services/config-service";
+import { KnowledgeConfigService } from "../../../../../server/services/knowledge-config-service";
 import { getActiveSources } from "../../../../../server/watchers/tool-dir-watcher";
 import { getFileWatcherStatus } from "../../../../../server/watchers/file-watcher";
 import { MemoryService } from "../../../../../server/services/memory-service";
@@ -11,7 +11,7 @@ import { MemoryService } from "../../../../../server/services/memory-service";
 export async function GET() {
   const activeSources = getActiveSources();
 
-  const configService = new ConfigService();
+  const configService = new KnowledgeConfigService();
   let enabledCount: number;
   try {
     enabledCount = configService.listEnabledToolSources().length;

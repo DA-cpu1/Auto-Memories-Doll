@@ -183,7 +183,7 @@ describe("VectorIndex", () => {
 describe("Ranker", () => {
   it("returns empty for empty candidates", () => {
     const ranker = new Ranker();
-    expect(ranker.rank([], new Map(), [])).toEqual([]);
+    expect(ranker.rank([], new Map())).toEqual([]);
   });
 
   it("skips candidates whose memory is missing from the map", () => {
@@ -197,7 +197,6 @@ describe("Ranker", () => {
         { memoryId: "m2", similarity: 0.8 },
       ],
       memories,
-      [],
     );
     expect(results).toHaveLength(1);
     expect(results[0].memoryId).toBe("m1");
@@ -211,7 +210,7 @@ describe("Ranker", () => {
     const mem = makeMemory({ id: "m1", updatedAt: hoursAgo69, accessCount: 0, tags: [] });
     const memories = new Map([["m1", mem]]);
 
-    const results = ranker.rank([{ memoryId: "m1", similarity: 0.5 }], memories, []);
+    const results = ranker.rank([{ memoryId: "m1", similarity: 0.5 }], memories);
     const recency = results[0].factors.recency;
     // 半衰期约 69.3 小时，recency 应在 0.5 附近（容差 0.05）
     expect(recency).toBeGreaterThan(0.45);
@@ -233,7 +232,6 @@ describe("Ranker", () => {
         { memoryId: "m2", similarity: 0.5 },
       ],
       memories,
-      [],
     );
     // max=100，m1 accessCount=0 → accessScore = ln(1)/ln(101) = 0
     // m2 accessCount=100 → accessScore = ln(101)/ln(101) = 1
@@ -243,25 +241,20 @@ describe("Ranker", () => {
     expect(m2Result.factors.access).toBeCloseTo(1, 5);
   });
 
-  it("computes tagAffinityScore via Jaccard similarity", () => {
+  it("computes deterministic quality from completeness and source evidence", () => {
     const ranker = new Ranker();
-    const mem = makeMemory({ id: "m1", tags: ["a", "b", "c"] });
+    const mem = makeMemory({
+      id: "m1",
+      content: "A sufficiently detailed knowledge record with traceable evidence.",
+      tags: ["quality"],
+      evidence: { text: "original source excerpt" },
+    });
     const memories = new Map([["m1", mem]]);
-    const profileTags = ["b", "c", "d"]; // 交集 {b,c}=2，并集 {a,b,c,d}=4 → 0.5
-
-    const results = ranker.rank([{ memoryId: "m1", similarity: 0.5 }], memories, profileTags);
-    expect(results[0].factors.tagAffinity).toBeCloseTo(0.5, 5);
+    const results = ranker.rank([{ memoryId: "m1", similarity: 0.5 }], memories);
+    expect(results[0].factors.quality).toBe(1);
   });
 
-  it("tagAffinity is 0 when profile has no tags", () => {
-    const ranker = new Ranker();
-    const mem = makeMemory({ id: "m1", tags: ["a"] });
-    const memories = new Map([["m1", mem]]);
-    const results = ranker.rank([{ memoryId: "m1", similarity: 0.5 }], memories, []);
-    expect(results[0].factors.tagAffinity).toBe(0);
-  });
-
-  it("weighted sum: 0.4*relevance + 0.25*heat + 0.2*recency + 0.1*access + 0.05*tag", () => {
+  it("weighted sum: 0.5*relevance + 0.2*quality + 0.2*recency + 0.1*access", () => {
     const ranker = new Ranker();
     const mem = makeMemory({
       id: "m1",
@@ -272,21 +265,20 @@ describe("Ranker", () => {
     });
     const memories = new Map([["m1", mem]]);
 
-    const results = ranker.rank([{ memoryId: "m1", similarity: 0.8 }], memories, ["a"]);
+    const results = ranker.rank([{ memoryId: "m1", similarity: 0.8 }], memories);
     const r = results[0];
     const expected =
-      0.8 * 0.4 +
-      0.6 * 0.25 +
+      0.8 * 0.5 +
+      r.factors.quality * 0.2 +
       r.factors.recency * 0.2 + // recency ≈ 1（刚刚更新）
-      r.factors.access * 0.1 +
-      r.factors.tagAffinity * 0.05;
+      r.factors.access * 0.1;
     expect(r.score).toBeCloseTo(expected, 5);
   });
 
   it("sorts results by score descending", () => {
     const ranker = new Ranker();
-    const mem1 = makeMemory({ id: "m1", heatScore: 0.1 });
-    const mem2 = makeMemory({ id: "m2", heatScore: 0.9 });
+    const mem1 = makeMemory({ id: "m1" });
+    const mem2 = makeMemory({ id: "m2", evidence: { text: "source excerpt" } });
     const memories = new Map([
       ["m1", mem1],
       ["m2", mem2],
@@ -298,9 +290,8 @@ describe("Ranker", () => {
         { memoryId: "m2", similarity: 0.5 },
       ],
       memories,
-      [],
     );
-    expect(results[0].memoryId).toBe("m2"); // heatScore 高的排前面
+    expect(results[0].memoryId).toBe("m2");
     expect(results[1].memoryId).toBe("m1");
   });
 
@@ -308,7 +299,7 @@ describe("Ranker", () => {
     const ranker = new Ranker();
     const mem = makeMemory({ id: "m1" });
     const memories = new Map([["m1", mem]]);
-    const results = ranker.rank([{ memoryId: "m1", similarity: 0.77 }], memories, []);
+    const results = ranker.rank([{ memoryId: "m1", similarity: 0.77 }], memories);
     expect(results[0].originalScore).toBe(0.77);
     expect(results[0].factors.relevance).toBe(0.77);
   });
@@ -317,14 +308,14 @@ describe("Ranker", () => {
 describe("Ranker.rankWithMMR", () => {
   it("returns empty for empty candidates", () => {
     const ranker = new Ranker();
-    expect(ranker.rankWithMMR([], new Map(), [])).toEqual([]);
+    expect(ranker.rankWithMMR([], new Map())).toEqual([]);
   });
 
   it("returns single candidate directly (no diversity penalty)", () => {
     const ranker = new Ranker();
     const mem = makeMemory({ id: "m1", heatScore: 0.5 });
     const memories = new Map([["m1", mem]]);
-    const results = ranker.rankWithMMR([{ memoryId: "m1", similarity: 0.8 }], memories, []);
+    const results = ranker.rankWithMMR([{ memoryId: "m1", similarity: 0.8 }], memories);
     expect(results).toHaveLength(1);
     expect(results[0].memoryId).toBe("m1");
     // 单候选时 score 应等于基础分数（无多样性惩罚）
@@ -333,8 +324,8 @@ describe("Ranker.rankWithMMR", () => {
 
   it("selects highest base score first", () => {
     const ranker = new Ranker();
-    const mem1 = makeMemory({ id: "m1", heatScore: 0.1 });
-    const mem2 = makeMemory({ id: "m2", heatScore: 0.9 });
+    const mem1 = makeMemory({ id: "m1" });
+    const mem2 = makeMemory({ id: "m2", evidence: { text: "source excerpt" } });
     const memories = new Map([
       ["m1", mem1],
       ["m2", mem2],
@@ -346,9 +337,8 @@ describe("Ranker.rankWithMMR", () => {
         { memoryId: "m2", similarity: 0.5 },
       ],
       memories,
-      [],
     );
-    // 首轮选基础分数最高的 m2（heatScore 0.9 > 0.1）
+    // 首轮选基础分数最高的 m2（可追溯证据使质量分更高）
     expect(results[0].memoryId).toBe("m2");
   });
 
@@ -372,7 +362,6 @@ describe("Ranker.rankWithMMR", () => {
         { memoryId: "m3", similarity: 0.5 },
       ],
       memories,
-      [],
     );
 
     // 首轮：m1 和 m2 基础分数相同（heat=0.5），选 m1
@@ -392,8 +381,8 @@ describe("Ranker.rankWithMMR", () => {
 
   it("alpha=1 degrades to pure relevance ranking (no diversity penalty)", () => {
     const ranker = new Ranker();
-    const mem1 = makeMemory({ id: "m1", heatScore: 0.5, tags: ["a"] });
-    const mem2 = makeMemory({ id: "m2", heatScore: 0.4, tags: ["a"] });
+    const mem1 = makeMemory({ id: "m1", tags: ["a"], evidence: { text: "source excerpt" } });
+    const mem2 = makeMemory({ id: "m2", tags: ["a"] });
     const memories = new Map([
       ["m1", mem1],
       ["m2", mem2],
@@ -405,20 +394,24 @@ describe("Ranker.rankWithMMR", () => {
         { memoryId: "m2", similarity: 0.5 },
       ],
       memories,
-      [],
       { alpha: 1 },
     );
 
-    // α=1 时无多样性惩罚，应按基础分数排序：m1(heat=0.5) > m2(heat=0.4)
+    // α=1 时无多样性惩罚，应按基础分数排序：m1 的可追溯质量更高。
     expect(results[0].memoryId).toBe("m1");
     expect(results[1].memoryId).toBe("m2");
   });
 
   it("alpha=0 prioritizes pure diversity (maximally different first)", () => {
     const ranker = new Ranker();
-    // 两条记忆 tags 完全相同，但 m2 基础分数更高
+    // 两条记忆 tags 完全相同，但 m2 的可追溯质量更高。
     const mem1 = makeMemory({ id: "m1", heatScore: 0.3, tags: ["a"] });
-    const mem2 = makeMemory({ id: "m2", heatScore: 0.9, tags: ["a"] });
+    const mem2 = makeMemory({
+      id: "m2",
+      heatScore: 0.9,
+      tags: ["a"],
+      evidence: { text: "source excerpt" },
+    });
     const mem3 = makeMemory({ id: "m3", heatScore: 0.3, tags: ["z"] });
     const memories = new Map([
       ["m1", mem1],
@@ -433,11 +426,10 @@ describe("Ranker.rankWithMMR", () => {
         { memoryId: "m3", similarity: 0.5 },
       ],
       memories,
-      [],
       { alpha: 0 },
     );
 
-    // α=0 时首轮仍选基础分数最高（m2, heat=0.9）
+    // α=0 时首轮仍选基础分数最高（m2 的质量更高）
     expect(results[0].memoryId).toBe("m2");
     // 第二轮：m1 与 m2 tags 相同（Jaccard=1），m3 与 m2 tags 完全不同（Jaccard=0）
     // α=0 时 MMR = -max_sim，m1 的 MMR = -1，m3 的 MMR = 0
@@ -463,7 +455,6 @@ describe("Ranker.rankWithMMR", () => {
         { memoryId: "m4", similarity: 0.2 },
       ],
       memories,
-      [],
     );
 
     // MMR 是重排，不丢弃候选

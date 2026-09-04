@@ -7,10 +7,9 @@ export type RankResult = {
   originalScore: number;
   factors: {
     relevance: number;
-    heat: number;
+    quality: number;
     recency: number;
     access: number;
-    tagAffinity: number;
   };
 };
 
@@ -23,17 +22,14 @@ export type MmrOptions = {
 export class Ranker {
   /**
    * 基础多因子加权排序（非 MMR）：
-   * score = relevance*W.relevance + heat*W.heat + recency*W.recency + access*W.access + tagAffinity*W.tagAffinity
-   * 各子项公式与 AGENTS.md 4.10 heatScore 子项一致（recency λ=0.01，半衰期 ~69h）
+   * score = relevance*W.relevance + quality*W.quality + recency*W.recency + access*W.access
+   * Quality is deterministic and based only on record completeness and source traceability.
    */
   rank(
     candidates: { memoryId: string; similarity: number }[],
     memories: Map<string, MemoryRecord>,
-    profileTags: string[],
   ): RankResult[] {
-    return this.computeBaseScores(candidates, memories, profileTags).sort(
-      (a, b) => b.score - a.score,
-    );
+    return this.computeBaseScores(candidates, memories).sort((a, b) => b.score - a.score);
   }
 
   /**
@@ -52,11 +48,10 @@ export class Ranker {
   rankWithMMR(
     candidates: { memoryId: string; similarity: number }[],
     memories: Map<string, MemoryRecord>,
-    profileTags: string[],
     options?: MmrOptions,
   ): RankResult[] {
     const alpha = options?.alpha ?? RANKER_DEFAULT_MMR_ALPHA;
-    const baseResults = this.computeBaseScores(candidates, memories, profileTags);
+    const baseResults = this.computeBaseScores(candidates, memories);
 
     if (baseResults.length <= 1) return baseResults;
 
@@ -110,7 +105,6 @@ export class Ranker {
   private computeBaseScores(
     candidates: { memoryId: string; similarity: number }[],
     memories: Map<string, MemoryRecord>,
-    profileTags: string[],
   ): RankResult[] {
     const now = Date.now();
     const maxAccess = Math.max(...Array.from(memories.values()).map((m) => m.accessCount), 1);
@@ -125,16 +119,13 @@ export class Ranker {
 
         const accessScore = Math.log(1 + memory.accessCount) / Math.log(1 + maxAccess);
 
-        const intersection = memory.tags.filter((t) => profileTags.includes(t)).length;
-        const union = memory.tags.length + profileTags.length - intersection;
-        const tagAffinityScore = union > 0 ? intersection / union : 0;
+        const qualityScore = calculateKnowledgeQuality(memory);
 
         const score =
           candidate.similarity * RANKER_WEIGHTS.relevance +
-          memory.heatScore * RANKER_WEIGHTS.heat +
+          qualityScore * RANKER_WEIGHTS.quality +
           recencyScore * RANKER_WEIGHTS.recency +
-          accessScore * RANKER_WEIGHTS.access +
-          tagAffinityScore * RANKER_WEIGHTS.tagAffinity;
+          accessScore * RANKER_WEIGHTS.access;
 
         return {
           memoryId: candidate.memoryId,
@@ -142,15 +133,27 @@ export class Ranker {
           originalScore: candidate.similarity,
           factors: {
             relevance: candidate.similarity,
-            heat: memory.heatScore,
+            quality: qualityScore,
             recency: recencyScore,
             access: accessScore,
-            tagAffinity: tagAffinityScore,
           },
         };
       })
       .filter((r): r is RankResult => r !== null);
   }
+}
+
+/** Deterministic quality signal used when the quality-gate score is not stored on MemoryRecord. */
+export function calculateKnowledgeQuality(memory: MemoryRecord): number {
+  let score = 0;
+  if (memory.title.trim()) score += 0.15;
+  if (memory.summary.trim()) score += 0.2;
+  score += Math.min(memory.content.trim().length / 40, 1) * 0.2;
+  if (memory.tags.length > 0) score += 0.1;
+  if (memory.topic.trim()) score += 0.1;
+  if (memory.source.trim()) score += 0.1;
+  if (memory.evidence?.text?.trim() || memory.evidence?.sourceHash?.trim()) score += 0.15;
+  return Math.min(score, 1);
 }
 
 /** 两个 tags 数组的 Jaccard 相似度：|交集| / |并集| */

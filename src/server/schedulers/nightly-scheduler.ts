@@ -55,7 +55,6 @@ export class NightlyScheduler {
         allSucceeded: report.allSucceeded,
         contradictions: report.contradiction?.contradictions.length ?? 0,
         linksAdded: report.links?.addedCount ?? 0,
-        routingChanges: report.routing?.appliedCount ?? 0,
       });
     } catch (e) {
       logger.nightly.error("[NightlyScheduler] 深夜督查异常", { error: (e as Error).message });

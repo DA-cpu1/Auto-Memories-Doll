@@ -1,5 +1,5 @@
 import { MemoryRecord } from "../../types/memory";
-import { ModelAdapter } from "../../lib/ai/model-adapter";
+import { KnowledgeModelAdapter } from "../../lib/ai/knowledge-model-adapter";
 import { WikiGraph } from "../../lib/graph/wiki-graph";
 import { logger } from "../../lib/logger";
 
@@ -40,7 +40,7 @@ export class LinkSupplementer {
       return { suggestions: [], addedCount: 0, failedCount: 0 };
     }
 
-    if (ModelAdapter.isDegradedMode) {
+    if (KnowledgeModelAdapter.isDegradedMode) {
       logger.nightly.info("模型降级中，跳过 wikilink 智能补充");
       return { suggestions: [], addedCount: 0, failedCount: 0 };
     }
@@ -137,7 +137,7 @@ ${candidatesText}
 只返回 JSON 数组，不要其他文字。`;
 
     try {
-      const response = await ModelAdapter.generate(prompt, "flagship");
+      const response = await KnowledgeModelAdapter.generate(prompt, "flagship");
       const jsonStr = response.content
         .trim()
         .replace(/^```(?:json)?\s*/i, "")

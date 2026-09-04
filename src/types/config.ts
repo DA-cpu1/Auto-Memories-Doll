@@ -113,10 +113,16 @@ export type ToolWatchSource = {
 
 export type AppConfig = {
   ai: AiConfig;
-  mcpServers: McpServerConfig[];
-  skills: SkillConfig[];
   storage: StorageConfig;
   toolSources: ToolWatchSource[];
 };
 
-export type ConfigSection = "ai" | "mcp" | "skills" | "storage" | "tool-sources";
+export type ConfigSection = "ai" | "storage" | "tool-sources";
+
+/** Temporary compatibility surface for features scheduled for removal in LKA-001 Phase 5. */
+export type LegacyIntegrationConfig = {
+  mcpServers: McpServerConfig[];
+  skills: SkillConfig[];
+};
+
+export type LegacyConfigSection = "mcp" | "skills";

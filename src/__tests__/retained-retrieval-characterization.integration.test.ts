@@ -4,7 +4,7 @@ import { dirname, join } from "node:path";
 import Database from "better-sqlite3";
 import { closeDatabase } from "../lib/storage/database";
 import { getNotePath, invalidatePathCache } from "../lib/storage/path-resolver";
-import { ModelAdapter } from "../lib/ai/model-adapter";
+import { KnowledgeModelAdapter } from "../lib/ai/knowledge-model-adapter";
 import { buildMemoryRecord } from "../lib/memory/builder";
 import { MemoryService } from "../server/services/memory-service";
 import { VectorRetriever } from "../lib/vector/retriever";
@@ -34,7 +34,7 @@ afterEach(() => {
 
 describe.sequential("retained retrieval characterization", () => {
   it("falls back to real keyword retrieval when embeddings are unavailable", async () => {
-    vi.spyOn(ModelAdapter, "generateEmbedding").mockResolvedValue({
+    vi.spyOn(KnowledgeModelAdapter, "generateEmbedding").mockResolvedValue({
       embedding: [],
       model: "unavailable",
       timestamp: "2026-09-03T00:00:00.000Z",
@@ -76,7 +76,7 @@ describe.sequential("retained retrieval characterization", () => {
   });
 
   it("retrieves the closest knowledge unit through the real vector index", async () => {
-    vi.spyOn(ModelAdapter, "generateEmbedding").mockImplementation(async (text) => ({
+    vi.spyOn(KnowledgeModelAdapter, "generateEmbedding").mockImplementation(async (text) => ({
       embedding: text.includes("SQLite") ? [0, 1] : [1, 0],
       model: "characterization-embedding",
       timestamp: "2026-09-03T00:00:00.000Z",
@@ -119,7 +119,7 @@ describe.sequential("retained retrieval characterization", () => {
   });
 
   it("merges the original query and a rewritten variant by each unit's best score", async () => {
-    vi.spyOn(ModelAdapter, "generateEmbedding").mockImplementation(async (text) => {
+    vi.spyOn(KnowledgeModelAdapter, "generateEmbedding").mockImplementation(async (text) => {
       let embedding = [1, 0];
       if (text === "前端性能方法") embedding = [0.2, 0.98];
       if (text.includes("SQLite")) embedding = [0, 1];
@@ -129,7 +129,7 @@ describe.sequential("retained retrieval characterization", () => {
         timestamp: "2026-09-03T00:00:00.000Z",
       };
     });
-    vi.spyOn(ModelAdapter, "generate").mockResolvedValue({
+    vi.spyOn(KnowledgeModelAdapter, "generate").mockResolvedValue({
       content: '{"variants":["避免组件重绘"]}',
       finishReason: "stop",
       model: "characterization-model",
@@ -261,7 +261,6 @@ describe.sequential("retained retrieval characterization", () => {
         { memoryId: diverse.id, similarity: 0.75 },
       ],
       memories,
-      [],
     );
 
     expect(results.map((result) => result.memoryId)).toEqual([

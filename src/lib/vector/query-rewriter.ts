@@ -1,4 +1,4 @@
-import { ModelAdapter } from "../ai/model-adapter";
+import { KnowledgeModelAdapter } from "../ai/knowledge-model-adapter";
 import { QUERY_REWRITE_MAX_CHARS, QUERY_REWRITE_MAX_VARIANTS } from "../../config/constants";
 import { logger } from "../logger";
 
@@ -20,7 +20,7 @@ export async function rewriteQueryVariants(query: string): Promise<string[]> {
 
   const prompt = buildRewritePrompt(trimmed);
   try {
-    const response = await ModelAdapter.generate(prompt, "budget");
+    const response = await KnowledgeModelAdapter.generate(prompt, "budget");
     if (response.finishReason === "degraded") return [];
     return parseVariants(response.content, trimmed);
   } catch (err) {

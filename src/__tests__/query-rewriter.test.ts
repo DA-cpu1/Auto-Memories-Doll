@@ -4,8 +4,8 @@ const mocks = vi.hoisted(() => ({
   generate: vi.fn(),
 }));
 
-vi.mock("../lib/ai/model-adapter", () => ({
-  ModelAdapter: { generate: mocks.generate },
+vi.mock("../lib/ai/knowledge-model-adapter", () => ({
+  KnowledgeModelAdapter: { generate: mocks.generate },
 }));
 
 import { rewriteQueryVariants, parseVariants } from "../lib/vector/query-rewriter";

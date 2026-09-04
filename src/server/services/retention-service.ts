@@ -1,6 +1,6 @@
 import { MemoryService } from "./memory-service";
 import { MemoryRecord } from "../../types/memory";
-import { ModelAdapter } from "../../lib/ai/model-adapter";
+import { KnowledgeModelAdapter } from "../../lib/ai/knowledge-model-adapter";
 import { logger } from "../../lib/logger";
 import { writeMemoryMarkdown, updateAgentMarkdown } from "../../lib/storage/memory-writer";
 import { updateIndexMap } from "../../lib/storage/index-writer";
@@ -106,14 +106,14 @@ export class MemoryRetentionService {
       .map((m, i) => `${i + 1}. ${m.title}\n${m.summary || m.content}`)
       .join("\n\n");
 
-    if (ModelAdapter.isDegradedMode) {
+    if (KnowledgeModelAdapter.isDegradedMode) {
       return `# ${topic} 历史摘要\n\n${input}`;
     }
 
     const prompt = `请将以下 ${topic} 话题的 ${memories.length} 条历史记忆压缩成一段简洁的中文摘要，保留关键事实、决策和背景，去除重复和琐碎细节。\n\n${input}\n\n摘要：`;
 
     try {
-      const response = await ModelAdapter.generate(prompt, "flagship");
+      const response = await KnowledgeModelAdapter.generate(prompt, "flagship");
       return response.content.trim() || `# ${topic} 历史摘要\n\n${input}`;
     } catch (error) {
       logger.retention.warn("LLM 摘要失败，使用拼接回退", { error: (error as Error).message });

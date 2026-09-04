@@ -40,7 +40,7 @@
 
 5. **系统配置重建而非快照**：持久化会话时不保存 system 角色消息。恢复会话时从当前 `PromptCache` 和工具注册表重建系统提示，确保升级配置后旧会话也受益。
 
-6. **模型边界显式化**：任何 AI 调用都经过 `ModelAdapter` 层。LLM/Embedding API 不可用时降级到本地检索模板回复，降级状态必须在前端可见。提供商通过 `providers.json` 声明式注册，零代码接入新端点。
+6. **模型边界显式化**：知识加工 AI 调用经过不含聊天事件类型的 `KnowledgeModelAdapter`；旧聊天流暂由 `ModelAdapter` 兼容并在 LKA-001 Phase 5 删除。LLM/Embedding API 不可用时降级状态必须在前端可见。提供商通过 `providers.json` 声明式注册，零代码接入新端点。
 
 7. **文档跟随实现，差异有记录**：AGENTS.md 的偏差表（11.1）持续维护。任何与规范的偏差都必须记录在表中，附上优先级和预期修复版本。每个 Phase 结束必须更新偏差表和路线图。
 
@@ -397,11 +397,11 @@ memory-root/
 - 注入提示词时按召回的 `memoryId` 精确加载（`getMemoriesByIds`），不再全量拉取记忆库；主体相关记忆上限 8 条，叠加图谱邻居后总量不超过 `RETRIEVAL_MAX_INJECTED_MEMORIES`。
 - 记忆纠错闭环（`MemoryCorrectionService`）：按 `memoryId` 或检索定位目标 → budget 模型按纠错指令改写标题/摘要/内容 → 变更经 `stageUpdateMemory` 走审计队列落库并追加 `corrected` 标签；模型降级时拒绝改写以避免污染。
 - 检索质量由 `src/eval/retrieval-eval.test.ts` 的 Recall@k / MRR 基线守护，`npm run eval` 生成报告。
-- 重排优先级依次考虑相关度、热度、最近更新、访问次数和个性标签偏置。
+- 重排优先级依次考虑相关度、知识完整性与来源可追溯质量、最近更新和访问次数，不得读取用户画像。
 - 检索结果注入 prompt 时，只注入摘要、来源和引用路径，不直接展开全部原文。
 - 前端必须支持关键词搜索索引到笔记。
-- 本地推荐算法按访问次数、最近访问时间、时间衰减和个性标签动态更新。
-- 推荐结果必须可解释，并能回写到本地索引地图、个性标签和相关时间戳。
+- 本地推荐算法按访问次数、最近访问时间和时间衰减动态更新。
+- 推荐结果必须可解释，并能回写到本地索引地图和相关时间戳。
 
 ### 4.10 数据类型约束
 - `MemoryRecord` 是主记录；`VectorRecord` 是按 `memoryId` 关联的向量索引；`GraphEdge` 是关系边；`MemoryVersion` 是历史快照索引。
@@ -411,11 +411,9 @@ memory-root/
 - 版本回滚只在写回失败、冲突不可解、或人工审计明确要求恢复历史状态时触发，回滚目标必须来自 `archive/*` 快照。
 - `VectorRecord.embedding` 的维度由 `dimensions` 字段决定，必须与 `model` 对应（见 5.2）。
 - `GraphEdge.from` 与 `GraphEdge.to` 均引用 `MemoryRecord.id`。
-- `heatScore` = `accessScore * 0.35 + recencyScore * 0.25 + exposureScore * 0.25 + tagAffinityScore * 0.15`，各子项归一化到 0 到 1：
+- `heatScore` = `accessScore * 0.55 + recencyScore * 0.45`，各子项归一化到 0 到 1：
   - `accessScore` = `ln(1 + accessCount) / ln(1 + maxAccessCount)`，其中 `maxAccessCount` 为当前所有记忆中的最大访问次数；无记忆时取 0。
   - `recencyScore` = `exp(-λ * Δt)`，其中 `Δt` 为当前时间与 `updatedAt` 的小时差，`λ = 0.01`（半衰期约 69 小时，约 3 天）。
-  - `exposureScore` = `exposureCount / maxExposureCount`，其中 `maxExposureCount` 为当前所有记忆中的最大曝光次数；无曝光时取 0。
-  - `tagAffinityScore` = 候选记忆标签与 `profile.md` 个性标签的 Jaccard 相似度（交集大小 / 并集大小）；无标签时取 0。
   - 各子项的默认参数（`λ`、归一化基准）定义在 `src/config/scoring.config.ts`，允许调整但变更后需重新计算全部 `heatScore`。
 - 冲突分级策略：审计持久化层比对候选记忆与现有记忆时，按以下三级处理：
   - 自动可合并：候选记忆与现有记忆的变更字段不重叠，或重叠字段值相同——直接合并写入，生成 `MemoryVersion` 快照。
@@ -841,7 +839,7 @@ export type ConflictRecord = {
 | 更新路径绕过质量闸门 | 旧实现仅新建记忆过质量闸门，update 事件 content 变更直接进审计 | 已修复：`Orchestrator` 更新分支在 `changedFields` 含 `content` 时同样执行向量去重 + 质量闸门（reject → rejected；review → warn 后继续审计 diff/冲突兜底） | ~~P1~~ |
 | 多入口写入无语义去重 | 旧实现仅 ingest 入口有 Jaccard 快筛，chat/listen/tool 等入口无语义去重 | 已修复：`Orchestrator` 统一入口向量语义去重（`VectorIndex.search` cosine ≥ 0.95 判重 → rejected）；一次 embedding 召回 top-K 相似记忆同时服务去重与闸门新颖性上下文（≥0.6 才注入 prompt，省 token） | ~~P1~~ |
 | review 无人工裁决出口 | 无 | 已修复：`Orchestrator.resolveReviewEvent(eventId, action)`（accept 跳闸门直接落盘，避免重新入队死循环；reject 终拒归档）+ `GET/POST /api/audit/review-events` 路由 + API 契约登记 | ~~P2~~ |
-| 产品范围与 LKA-001 目标不一致 | `docs/specs/001-local-knowledge-agent/` 将产品收缩为本地知识整理 Agent，并明确删除聊天、画像、人格 Prompt 和聊天型 MCP/Skills | Phase 2 已完成显式 `KnowledgeAgent`、统一来源版本和状态契约，范围外功能仍存在；必须在 Phase 4 解耦完成后，按 LKA-001 Phase 5 删除 | P0 |
+| 产品范围与 LKA-001 目标不一致 | `docs/specs/001-local-knowledge-agent/` 将产品收缩为本地知识整理 Agent，并明确删除聊天、画像、人格 Prompt 和聊天型 MCP/Skills | Phase 4 已完成保留链路解耦；范围外功能仍存在，下一步按 LKA-001 Phase 5 删除 | P0 |
 
 ### 11.2 渐进式路线图
 
@@ -936,7 +934,12 @@ Phase 2 — 显式 KnowledgeAgent 契约 [DONE]
   [x] 生产入口统一经 KnowledgeAgent，Orchestrator 降为内部兼容执行器
   [x] processing_attempts 类型化进度、结构化日志和状态查询
 Phase 3 — 去噪和来源追踪 [NEXT]
-Phase 4 — 保留代码解耦
+Phase 4 — 保留代码解耦 [DONE]
+  [x] 排序与 heatScore 删除画像亲和度
+  [x] path resolver / 存储迁移删除 PromptCache 依赖
+  [x] KnowledgeModelAdapter 与聊天 AiEvent 契约分离
+  [x] nightly 删除画像更新和聊天路由优化
+  [x] KnowledgeConfigService 仅持久化 AI、存储和工具来源配置，旧集成数据非破坏保留
 Phase 5 — 删除范围外功能
 Phase 6 — 主题学习资料生成
 Phase 7 — 用户界面重构
@@ -948,6 +951,7 @@ Phase 8 — 验证和作品集交付
 - LKA-001 Phase 0 已完成：规范确认、Git 基线、代码规模报告、移动端 hydration 竞争修复、图谱 E2E 更新和全门禁验证；详细结果见 `docs/specs/001-local-knowledge-agent/phase-0-baseline.md`
 - LKA-001 Phase 1 已完成：新增 13 条真实存储特征测试，并修复抽取卡覆盖原始 `sourceHash` 导致未变化文件重复入队的问题；详细结果见 `docs/specs/001-local-knowledge-agent/phase-1-characterization.md`
 - LKA-001 Phase 2 已完成：新增统一来源版本、`SourceRegistry`、集中状态机、显式 `KnowledgeAgent` 与持久化进度，生产入口不再直接实例化 `Orchestrator`；详细结果见 `docs/specs/001-local-knowledge-agent/phase-2-knowledge-agent.md`
+- LKA-001 Phase 4 已完成：排序、路径、AI 契约、nightly 和配置持久化均已与待删除功能解耦；详细结果见 `docs/specs/001-local-knowledge-agent/phase-4-decoupling.md`
 
 - 已完成 `ChatHandler` 系统提示拆分：`src/features/chat/system-prompt.ts`
 - 已完成审计报告写入拆分：`src/server/services/audit-report-writer.ts`

@@ -77,23 +77,6 @@ export class DailyReporter {
       sections.push("- 未发现遗漏的链接", "");
     }
 
-    // 路由优化
-    sections.push("## 路由表优化");
-    if (r.routing && r.routing.suggestions.length > 0) {
-      sections.push(
-        `- 建议 **${r.routing.suggestions.length}** 项调整`,
-        `- 已应用 **${r.routing.appliedCount}** 项`,
-        "",
-      );
-      for (const s of r.routing.suggestions) {
-        sections.push(
-          `- \`${s.taskCategory}\`: ${s.currentModel} → **${s.suggestedModel}** — ${s.reason}`,
-        );
-      }
-    } else {
-      sections.push("- 当前路由表无需调整", "");
-    }
-
     // 错误
     if (r.errors.length > 0) {
       sections.push("## 错误", "");

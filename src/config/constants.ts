@@ -37,11 +37,10 @@ export const INTENT_KEYWORD_POSITION_BONUS = 0.05;
 export const INTENT_MAX_CONFIDENCE = 0.95;
 
 export const RANKER_WEIGHTS = {
-  relevance: 0.4,
-  heat: 0.25,
+  relevance: 0.5,
+  quality: 0.2,
   recency: 0.2,
   access: 0.1,
-  tagAffinity: 0.05,
 } as const;
 
 export const RANKER_DEFAULT_MMR_ALPHA = 0.7;

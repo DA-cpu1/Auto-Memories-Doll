@@ -9,7 +9,6 @@ import { VectorRetriever } from "../../lib/vector/retriever";
 import { searchWithExpansion } from "../../lib/vector/query-expansion";
 import { Ranker } from "../../lib/vector/ranker";
 import { RETRIEVAL_CANDIDATE_LIMIT, RETRIEVAL_MAX_INJECTED_MEMORIES } from "../../config/constants";
-import { readProfileTags } from "../../lib/storage/index-writer";
 import { SkillManager } from "../../lib/skills/manager";
 import { McpManager } from "../../lib/mcp/manager";
 import { ToolCaller } from "../../lib/ai/tool-caller";
@@ -337,8 +336,7 @@ ${blocks.memoryBlock}
     const memoryMap = new Map(targetMemories.map((m) => [m.id, m]));
 
     // MMR 重排（相关性与多样性平衡，避免主题重复）
-    const profileTags = await readProfileTags();
-    const rankedResults = this.ranker.rankWithMMR(results, memoryMap, profileTags);
+    const rankedResults = this.ranker.rankWithMMR(results, memoryMap);
 
     const relevantMemories: MemoryRecord[] = [];
 

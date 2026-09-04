@@ -4,7 +4,7 @@ import { dirname, join } from "node:path";
 import { closeDatabase } from "../lib/storage/database";
 import { invalidatePathCache } from "../lib/storage/path-resolver";
 import { createSourceRevisionEvent } from "../lib/source/source-revision";
-import { ModelAdapter } from "../lib/ai/model-adapter";
+import { KnowledgeModelAdapter } from "../lib/ai/knowledge-model-adapter";
 import { KnowledgeAgent } from "../server/services/knowledge-agent";
 import { MemoryService } from "../server/services/memory-service";
 
@@ -126,7 +126,7 @@ describe.sequential("KnowledgeAgent source orchestration", () => {
   });
 
   it("owns queue processing and emits a waiting review state when the model is degraded", async () => {
-    vi.spyOn(ModelAdapter, "isDegradedMode", "get").mockReturnValue(true);
+    vi.spyOn(KnowledgeModelAdapter, "isDegradedMode", "get").mockReturnValue(true);
     const sourcePath = join(memoryRoot, "imports", "needs-review.md");
     const content = "# Needs review\n\n模型不可用时，这条候选不能默认发布。";
     mkdirSync(dirname(sourcePath), { recursive: true });

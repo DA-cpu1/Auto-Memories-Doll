@@ -73,7 +73,6 @@ export const getMemoryRoot = (): string => {
  * 失效笔记路径缓存。
  *
  * 在用户通过设置面板修改 notesPath 后调用，确保后续 getMemoryRoot() 读取新值。
- * 同时失效 PromptCache（画像与系统提示词依赖 profile.md 路径）。
  */
 export const invalidatePathCache = (): void => {
   cachedMemoryRoot = null;

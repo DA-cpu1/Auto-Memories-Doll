@@ -44,8 +44,8 @@ vi.mock("../lib/storage/database", () => ({
   closeDatabase: () => undefined,
 }));
 
-vi.mock("../server/services/config-service", () => ({
-  ConfigService: vi.fn(() => ({
+vi.mock("../server/services/knowledge-config-service", () => ({
+  KnowledgeConfigService: vi.fn(() => ({
     getAiConfig: vi.fn(() => configMock),
     getDefaultAiConfig: vi.fn(() => configMock),
     close: vi.fn(),
@@ -56,7 +56,7 @@ vi.mock("../lib/vector/index", () => ({
   VectorIndex: vi.fn(() => vectorIndexMock),
 }));
 
-import { ModelAdapter } from "../lib/ai/model-adapter";
+import { KnowledgeModelAdapter as ModelAdapter } from "../lib/ai/knowledge-model-adapter";
 import { VectorRetriever } from "../lib/vector/retriever";
 
 beforeEach(() => {

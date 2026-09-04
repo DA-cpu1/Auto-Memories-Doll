@@ -1,8 +1,8 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
-// ── mock ModelAdapter ──
-vi.mock("../lib/ai/model-adapter", () => ({
-  ModelAdapter: {
+// ── mock knowledge model boundary ──
+vi.mock("../lib/ai/knowledge-model-adapter", () => ({
+  KnowledgeModelAdapter: {
     generate: vi.fn(),
     isDegradedMode: false,
   },
@@ -10,7 +10,8 @@ vi.mock("../lib/ai/model-adapter", () => ({
 
 import { QualityFilterService } from "../server/services/quality-filter-service";
 import { MemoryRecord } from "../types/memory";
-import { ModelAdapter } from "../lib/ai/model-adapter";
+import { KnowledgeModelAdapter } from "../lib/ai/knowledge-model-adapter";
+const ModelAdapter = KnowledgeModelAdapter;
 
 const makeCandidate = (overrides: Partial<MemoryRecord> = {}): MemoryRecord => ({
   id: "mem-1",
@@ -43,12 +44,12 @@ describe("QualityFilterService", () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
-    (ModelAdapter as any).isDegradedMode = false;
+    (KnowledgeModelAdapter as any).isDegradedMode = false;
     service = new QualityFilterService();
   });
 
   it("降级模式 → review（fail-closed，转人工裁决）", async () => {
-    (ModelAdapter as any).isDegradedMode = true;
+    (KnowledgeModelAdapter as any).isDegradedMode = true;
 
     const result = await service.filter(makeCandidate());
 

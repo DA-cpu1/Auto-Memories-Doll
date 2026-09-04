@@ -1,5 +1,5 @@
 import { MemoryRecord, MemoryKind } from "../../types/memory";
-import { ModelAdapter } from "../../lib/ai/model-adapter";
+import { KnowledgeModelAdapter } from "../../lib/ai/knowledge-model-adapter";
 import { logger } from "../../lib/logger";
 
 /** 相似记忆提示：给闸门提供"库里已有什么"的参考上下文，用于判断新颖性 */
@@ -42,7 +42,7 @@ export class QualityFilterService {
     similar: SimilarMemoryHint[] = [],
   ): Promise<QualityFilterResult> {
     // 闸门不可用 → 转人工裁决，不放行（fail-closed）
-    if (ModelAdapter.isDegradedMode) {
+    if (KnowledgeModelAdapter.isDegradedMode) {
       return { verdict: "review", reason: "质量闸门不可用（模型降级模式），转人工裁决" };
     }
 
@@ -50,7 +50,7 @@ export class QualityFilterService {
 
     for (let attempt = 1; attempt <= MAX_PARSE_ATTEMPTS; attempt++) {
       try {
-        const response = await ModelAdapter.generate(prompt, "flagship");
+        const response = await KnowledgeModelAdapter.generate(prompt, "flagship");
         const parsed = this.parseVerdict(response.content);
         if (parsed) return this.applyKindAndEvidenceRules(parsed, candidate);
         logger.quality.warn("质量闸门输出非标准 JSON，重试", {

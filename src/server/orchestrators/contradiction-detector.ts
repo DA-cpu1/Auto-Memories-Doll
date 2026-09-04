@@ -1,5 +1,5 @@
 import { MemoryRecord } from "../../types/memory";
-import { ModelAdapter } from "../../lib/ai/model-adapter";
+import { KnowledgeModelAdapter } from "../../lib/ai/knowledge-model-adapter";
 import { logger } from "../../lib/logger";
 
 export interface ContradictionItem {
@@ -38,7 +38,7 @@ export class ContradictionDetector {
       return { contradictions: [], totalCompared: 0 };
     }
 
-    if (ModelAdapter.isDegradedMode) {
+    if (KnowledgeModelAdapter.isDegradedMode) {
       logger.nightly.info("模型降级中，跳过矛盾精判");
       return { contradictions: [], totalCompared: 0 };
     }
@@ -105,7 +105,7 @@ ${pairsText}
 
 只返回 JSON 数组，不要其他文字。`;
 
-    const response = await ModelAdapter.generate(prompt, "flagship");
+    const response = await KnowledgeModelAdapter.generate(prompt, "flagship");
     const jsonStr = response.content
       .trim()
       .replace(/^```(?:json)?\s*/i, "")
