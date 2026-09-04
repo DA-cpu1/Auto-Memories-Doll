@@ -1,6 +1,6 @@
 # Auto-Memories-Doll
 
-**和 AI 聊了 30 轮，它忘了你第 1 轮说的重要东西？这个工具在后台自动把你的对话归类整理成笔记，下次聊天时自动检索回来。**
+**持续监听本地资料和开发工具会话，把含噪内容整理成可审核、可追溯、可直接检索的 Markdown 知识。**
 
 [English](#english) · [快速开始](#快速开始) · [功能](#功能) · [架构](#架构) · [开发](#开发)
 
@@ -8,27 +8,27 @@
 
 ## 为什么需要这个
 
-你正在学一门新技术，和 AI 聊了一下午。第二天打开对话，它不记得昨天讨论过什么了。ChatGPT 的 Memory 只能记住一些零碎的事实，不会帮你系统地整理知识。
+开发者的技术笔记、调试记录和工具会话分散在不同目录，混有重复日志、临时方案和不完整片段，普通文件搜索很难再次找到真正有用的内容。
 
 Auto-Memories-Doll 做的事情很简单：
 
 ```
-你和 AI 的对话（散落在各个工具里）
-        ↓ 自动采集
-  后台按话题归类整理
-        ↓ 自动生成
-  结构化的 Markdown 笔记
-        ↓ 下次聊天时
-  自动检索相关记忆注入上下文
+本地文件 / 开发工具会话 / Listen API
+        ↓ 来源版本与归一化
+  去重、提取、分类、质量评价
+        ↓ 审核后发布
+  带来源引用的 Markdown 知识
+        ↓
+  检索库 / 主题 / 图谱直接阅读
 ```
 
 不是黑盒数据库，不是云端的 API。你的知识就是一个个 Markdown 文件，存在你自己电脑上，用任何编辑器都能打开看。
 
 ## 适合谁
 
-- **学生** — 和 AI 讨论作业、论文、课程，自动整理成按话题分类的笔记库
-- **开发者** — 和编程助手的对话自动归档，下次遇到类似 bug 时自动关联之前的解法
-- **知识工作者** — 散落在 Trae、Cursor、ChatGPT 里的对话汇总到一个地方，统一管理
+- **学生** — 把课程笔记和工具会话整理成按话题分类的知识库
+- **开发者** — 自动归档编程助手会话与技术文档，检索过去的解法
+- **知识工作者** — 汇总散落在本地目录和开发工具中的资料，并保留来源
 
 ## 快速开始
 
@@ -51,7 +51,7 @@ cp .env.example .env.local
 npm run dev
 ```
 
-打开 `http://localhost:3000`，开始对话。
+打开 `http://localhost:3000`，查看来源处理状态、审核队列并检索知识。
 
 应用默认只绑定本机 `127.0.0.1`，API 也会拒绝非本机 Host 请求。远程或局域网暴露当前不受支持，请不要把启动参数改为 `0.0.0.0` 后直接公开使用；本机工具应通过 `localhost` 或 `127.0.0.1` 调用 API。
 
@@ -74,15 +74,13 @@ FLAGSHIP_MODEL=deepseek-chat
 
 ## 功能
 
-### 自动采集：对话从哪来都行
+### 自动采集：统一来源版本
 
-| 来源                         | 怎么接               | 说明                   |
-| ---------------------------- | -------------------- | ---------------------- |
-| 内置对话                     | 首页点击「开始对话」 | 带记忆检索的 AI 对话   |
-| Trae IDE / 浏览器 AI         | `POST /api/listen`   | 对话完成后自动推送     |
-| Cursor / Codex / Claude Code | 设置里添加目录监听   | 自动解析会话文件       |
-| 本地 Markdown 文件           | 放入 `memory-root/`  | 文件变化自动导入       |
-| Chrome / Edge                | 定时采集（默认关）   | 浏览记录和书签自动总结 |
+| 来源                         | 怎么接             | 说明                     |
+| ---------------------------- | ------------------ | ------------------------ |
+| Trae IDE / 浏览器 AI         | `POST /api/listen` | 结构化会话推送           |
+| Cursor / Codex / Claude Code | 设置里添加目录监听 | 自动解析会话文件         |
+| 本地 Markdown / Text         | 配置来源目录       | 文件变化后生成稳定 revision |
 
 ### 自动归类：7 个话题分类
 
@@ -109,21 +107,15 @@ FLAGSHIP_MODEL=deepseek-chat
 - **知识关联** — 通过 `[[wikilink]]` 建立记忆之间的关系
 - **热度评分** — 常访问的、最近更新的笔记排在前面
 
-### 自动检索：下次聊天时自动召回
+### 混合检索：直接查阅知识
 
-新对话开始时，系统自动：
+用户在首页或检索库提交查询后，系统自动：
 
 1. 多路召回：原句 + 改写变体并行检索（改写失败自动退回单路）
 2. 用向量搜索找到语义相关的记忆
 3. 用 MMR 重排保证多样性（不召回一堆相似内容）
-4. 按命中的记忆 ID 精确加载，通过图谱扩展找到关联记忆
-5. 注入到 AI 的上下文中
-
-AI 在第 N 轮对话时，仍然记得第 1 轮讨论过什么。
-
-### 记忆纠错：发现记错了可以直接改
-
-对话里说"你记错了，XXX 其实是 YYY"，系统会定位到那条记忆、按你的说法改写，并把改动走审计队列落库（打上 `corrected` 标签，可追溯）。模型不可用时拒绝改写，不会污染笔记。
+4. 按命中的记忆 ID 精确加载，通过图谱扩展找到关联知识
+5. 展示主题、来源和相关度，直接打开知识详情
 
 ### 审计安全：不会意外覆盖你的笔记
 
@@ -136,7 +128,7 @@ AI 在第 N 轮对话时，仍然记得第 1 轮讨论过什么。
 
 ### 降级保护
 
-- API 挂了 → 自动切换本地检索模式
+- LLM 不可用 → 依赖模型的候选转入人工审核
 - Embedding 不可用 → 降级为关键词搜索
 - 恢复后自动退出降级，前端全程可见状态
 
@@ -184,7 +176,6 @@ curl -X POST http://localhost:3000/api/listen \
 ```
 memory-root/
 ├── memory.db              # SQLite（向量索引、审计队列、冲突记录）
-├── profile.md             # 用户画像
 ├── notes/                 # 笔记（按话题分目录）
 │   ├── ai-coding/
 │   │   ├── Agent.md       # 该话题的摘要
@@ -204,13 +195,11 @@ memory-root/
 
 ![Auto-Memories-Doll 知识库更新架构图](结构图/knowledge-architecture.architecture.visual-check.1440x900.light.png)
 
-系统按“入口 → 快轨 → 后台加工 → 三层审计 → 主存储/派生索引”组织。候选记忆不会直接写入长期知识库，而是先进入待审计队列，再经过质量判断、人工复核和差异审计：
+系统按“来源入口 → KnowledgeAgent → 审计发布 → 主存储/派生索引”组织。候选知识不会直接写入长期知识库，而是先进入待审计队列，再经过质量判断、人工复核和差异审计：
 
 ```
-用户输入 → 意图分类（关键词→语义→LLM 三级级联）
-         → 记忆检索（向量 + 关键词 + 图谱）
-         → 组装 prompt → AI 流式响应 → 工具调用循环
-         → 候选记忆入待审计队列
+来源版本 → 解析与归一化
+         → 候选知识入待审计队列
          → 中级模型话题复核（白名单约束，失败回退规则）
          → 质量闸门（accept / review / reject）
          → 旧记忆卫生检查（乱码 / 英文残留 / 格式 / 表达）
@@ -219,18 +208,17 @@ memory-root/
          → Markdown 真源写回 → Vector / Graph 派生索引刷新
 ```
 
-| 层             | 职责                                                                 | 关键模块                                                                                     |
-| -------------- | -------------------------------------------------------------------- | -------------------------------------------------------------------------------------------- |
-| 入口层         | 用户交互、多源输入和 API 接入                                        | `src/app/`, `src/components/`, `src/app/api/`                                                |
-| 1 快轨层       | 记忆检索、提示组装、Agent 循环和流式响应，只产生候选                 | `src/features/chat/handler.ts`, `src/lib/ai/`                                                |
-| 2 后台加工层   | 清洗、分类、去重、结构化和待审计事件生成                             | `src/features/ingest/`, `src/server/pipelines/`, `MemoryService`                             |
-| 3 话题复核     | 用 `standard` 模型复核候选话题，只允许选择白名单目录，失败回退规则   | `src/server/services/topic-classification-service.ts`, `src/server/services/orchestrator.ts` |
-| 3 质量闸门     | 按规则将候选分为接受、人工复核或拒绝                                 | `src/features/audit/auditor.ts`, `differ.ts`                                                 |
-| 3 旧卡卫生门禁 | 合并更新前检查已有卡片质量；旧卡低质时先生成清理事件，暂缓新内容合并 | `src/server/services/memory-card-hygiene-service.ts`, `src/server/services/orchestrator.ts`  |
-| 3 人工复核     | 处理 review 事件、冲突和人工裁决                                     | `src/features/audit/reviewer.ts`, `src/components/audit/`, `src/app/api/audit/`              |
-| 3 审计中枢     | 差异比对、版本校验、写回调度和失败重试                               | `src/server/services/orchestrator.ts`, `src/server/workers/audit-worker.ts`                  |
-| 主存储真源     | 保存 Markdown LLMWiki、SQLite 队列、版本和冲突记录                   | `memory-root/`, `src/lib/storage/`                                                           |
-| 派生检索索引   | 从真源重建向量 ANN、关键词和 wikilink 图谱索引                       | `src/lib/vector/`, `src/lib/graph/`                                                          |
+| 层           | 职责                                                               | 关键模块                                                                                     |
+| ------------ | ------------------------------------------------------------------ | -------------------------------------------------------------------------------------------- |
+| 入口层       | 来源配置、文件/工具会话监听、人工导入、审核和检索                  | `src/app/`, `src/server/watchers/`, `src/app/api/`                                           |
+| Agent 编排   | 来源版本、阶段迁移、候选入队、恢复和进度记录                       | `src/server/services/knowledge-agent.ts`, `src/lib/source/`                                    |
+| 后台加工层   | 清洗、分类、去重、结构化和待审计事件生成                           | `src/features/ingest/`, `src/server/pipelines/`, `MemoryService`                             |
+| 话题复核     | 用 `standard` 模型复核候选话题，只允许选择白名单目录，失败回退规则 | `src/server/services/topic-classification-service.ts`, `src/server/services/orchestrator.ts` |
+| 质量闸门     | 按规则将候选分为接受、人工复核或拒绝                               | `src/server/services/quality-filter-service.ts`                                               |
+| 人工复核     | 处理 review 事件、冲突和人工裁决                                   | `src/features/audit/`, `src/components/audit/`, `src/app/api/audit/`                           |
+| 审计中枢     | 差异比对、版本校验、写回调度和失败重试                             | `src/server/services/orchestrator.ts`, `src/server/workers/audit-worker.ts`                  |
+| 主存储真源   | 保存 Markdown LLMWiki、SQLite 队列、版本和冲突记录                 | `memory-root/`, `src/lib/storage/`                                                           |
+| 派生检索索引 | 从真源重建向量 ANN、关键词和 wikilink 图谱索引                     | `src/lib/vector/`, `src/lib/graph/`                                                          |
 
 技术栈：TypeScript / Next.js 14 / React 18 / Vercel AI SDK / SQLite / HNSW 向量索引 / Tailwind CSS
 
@@ -239,7 +227,7 @@ memory-root/
 ```bash
 npm run typecheck    # 类型检查
 npm run lint         # 严格 Lint（0 warning）
-npm test             # 运行单元/集成测试（44 文件，413 用例）
+npm test             # 运行单元/集成测试（49 文件，438 用例）
 npm run test:coverage # 覆盖率门禁（Lines 30% / Branches 70% / Functions 50%）
 npm run eval         # 检索评测（Recall@k / MRR 报告）
 npm run format:check # 格式检查
@@ -254,9 +242,9 @@ Playwright E2E 使用 `e2e/.tmp/` 下的隔离 memory root 和数据库，测试
 
 个人学习项目，v0.1 阶段。核心链路已跑通，持续改进中。
 
-**已完成：** Agent 循环 · 记忆审计管线 · HNSW 向量检索 · 关键词降级 · MMR 重排 · 多路召回（query 改写）· 记忆纠错闭环 · 检索评测（Recall@k/MRR）· GitHub Actions CI · 多源采集 · 会话持久化 · 上下文压缩 · 降级恢复 · loopback 安全边界 · 真实 Playwright E2E · 413 个测试用例
+**已完成：** KnowledgeAgent 来源循环 · 审计发布管线 · HNSW 向量检索 · 关键词降级 · MMR 重排 · 多路召回 · 检索评测（Recall@k/MRR）· 多源采集 · 降级恢复 · loopback 安全边界 · 真实 Playwright E2E · 438 个测试用例
 
-**计划中：** Electron 桌面封装 · 评测集扩充与参数调优 · 会话树形分支
+**计划中：** 去噪与来源追踪 · 主题学习资料生成 · 页面信息架构收口 · 评测集扩充
 
 ## License
 
@@ -268,15 +256,15 @@ MIT
 
 ## English
 
-**Auto-Memeries-Doll** is a local-first AI assistant that automatically captures, categorizes, and organizes your conversations into structured Markdown notes — so the AI never forgets what you discussed earlier.
+**Auto-Memories-Doll** is a local-first knowledge organization agent that watches local files and development-tool sessions, then turns noisy source material into reviewable, traceable Markdown knowledge.
 
 ### The Problem
 
-After 30 rounds of conversation, AI forgets what you said in round 1. Existing memory features only capture fragmented facts, not structured knowledge.
+Technical notes, debugging logs, and tool sessions are scattered across local directories and are difficult to reuse with ordinary file search.
 
 ### What It Does
 
-- **Auto-captures** conversations from Trae IDE, Cursor, Claude Code, browser AI sessions
+- **Auto-captures** Markdown, text, Codex, Cursor, Claude Code, and typed listener input
 - **Auto-categorizes** into 7 topic directories (coding, learning, planning, daily notes, meetings, reading, ideas)
 - **Auto-organizes** with summaries, tags, heat scores, and knowledge graph links
 - **Auto-retrieves** relevant memories via HNSW vector search + MMR diversity reranking
@@ -292,11 +280,11 @@ cp .env.example .env.local   # Add your API key
 npm run dev
 ```
 
-Open `http://localhost:3000` and start chatting.
+Open `http://localhost:3000` to inspect processing status, review candidates, and search knowledge.
 
 ### Key Features
 
-- 5 input sources (built-in chat, API listener, tool directory watcher, file watcher, browser history)
+- Stable source revisions across API, tool-directory, and file watchers
 - 7 auto topic categories with customizable rules
 - HNSW vector search with keyword fallback
 - Audit queue with conflict detection (never overwrites your notes accidentally)

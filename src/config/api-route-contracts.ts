@@ -20,30 +20,6 @@ export const apiRouteContracts: Record<string, ApiRouteContract> = {
     responseSchema: "reviewEventsResponseSchema",
     errorCodes: ["VALIDATION_FAILED", "NOT_FOUND", "INTERNAL_ERROR"],
   },
-  "src/app/api/chat/route.ts": {
-    requestSchema: "chatRequestSchema",
-    responseSchema: "chatResponseSchema",
-    errorCodes: ["VALIDATION_FAILED", "AI_UNAVAILABLE", "INTERNAL_ERROR"],
-  },
-  "src/app/api/chat/sessions/route.ts": {
-    responseSchema: "chatSessionSummaryResponseSchema",
-    errorCodes: ["INTERNAL_ERROR"],
-  },
-  "src/app/api/chat/sessions/import/route.ts": {
-    requestSchema: "chatSessionImportSchema",
-    responseSchema: "chatSessionImportResponseSchema",
-    errorCodes: ["VALIDATION_FAILED", "INTERNAL_ERROR"],
-  },
-  "src/app/api/chat/sessions/[id]/route.ts": {
-    requestSchema: "chatSessionWriteSchema",
-    responseSchema: "chatSessionDetailResponseSchema",
-    errorCodes: ["VALIDATION_FAILED", "NOT_FOUND", "INTERNAL_ERROR"],
-  },
-  "src/app/api/chat/stream/route.ts": {
-    requestSchema: "chatRequestSchema",
-    responseSchema: "streamResponseSchema",
-    errorCodes: ["VALIDATION_FAILED", "AI_UNAVAILABLE", "CHAT_NO_RESPONSE_BODY", "INTERNAL_ERROR"],
-  },
   "src/app/api/config/ai/route.ts": {
     requestSchema: "aiConfigSchema",
     responseSchema: "aiConfigResponseSchema",
@@ -53,31 +29,6 @@ export const apiRouteContracts: Record<string, ApiRouteContract> = {
     requestSchema: "aiConfigTestSchema",
     responseSchema: "aiConfigTestResponseSchema",
     errorCodes: ["VALIDATION_FAILED", "INTERNAL_ERROR"],
-  },
-  "src/app/api/config/mcp/route.ts": {
-    requestSchema: "mcpServerSchema",
-    responseSchema: "mcpServerListResponseSchema",
-    errorCodes: ["VALIDATION_FAILED", "INTERNAL_ERROR"],
-  },
-  "src/app/api/config/mcp/[id]/route.ts": {
-    requestSchema: "mcpServerSchema",
-    responseSchema: "mcpServerResponseSchema",
-    errorCodes: ["VALIDATION_FAILED", "NOT_FOUND", "INTERNAL_ERROR"],
-  },
-  "src/app/api/config/skills/route.ts": {
-    requestSchema: "skillSchema",
-    responseSchema: "skillListResponseSchema",
-    errorCodes: ["VALIDATION_FAILED", "INTERNAL_ERROR"],
-  },
-  "src/app/api/config/skills/import/route.ts": {
-    requestSchema: "skillImportSchema",
-    responseSchema: "skillImportResponseSchema",
-    errorCodes: ["VALIDATION_FAILED", "INTERNAL_ERROR"],
-  },
-  "src/app/api/config/skills/[id]/route.ts": {
-    requestSchema: "skillSchema",
-    responseSchema: "skillResponseSchema",
-    errorCodes: ["VALIDATION_FAILED", "NOT_FOUND", "INTERNAL_ERROR"],
   },
   "src/app/api/config/storage/route.ts": {
     requestSchema: "storageConfigUpdateSchema",
@@ -151,20 +102,5 @@ export const apiRouteContracts: Record<string, ApiRouteContract> = {
   "src/app/api/memory/[id]/access/route.ts": {
     responseSchema: "memoryAccessResponseSchema",
     errorCodes: ["NOT_FOUND", "INTERNAL_ERROR"],
-  },
-  "src/app/api/profile/route.ts": {
-    requestSchema: "analyzeRequestSchema",
-    responseSchema: "profileResponseSchema",
-    errorCodes: ["VALIDATION_FAILED", "INTERNAL_ERROR"],
-  },
-  "src/app/api/prompt/route.ts": {
-    requestSchema: "promptCreateSchema",
-    responseSchema: "promptListResponseSchema",
-    errorCodes: ["VALIDATION_FAILED", "PROMPT_CREATE_FAILED", "INTERNAL_ERROR"],
-  },
-  "src/app/api/prompt/[id]/route.ts": {
-    requestSchema: "promptUpdateSchema",
-    responseSchema: "promptDetailResponseSchema",
-    errorCodes: ["VALIDATION_FAILED", "NOT_FOUND", "PROMPT_NOT_FOUND", "INTERNAL_ERROR"],
   },
 };

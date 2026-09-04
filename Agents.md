@@ -6,19 +6,16 @@
 |------|--------|------|
 | **记忆 (Memory)** | Markdown 文件承载的独立知识单元，含 YAML 元数据，人类和 LLM 均可直读 | `memory-root/notes/` |
 | **KnowledgeAgent 循环** | 来源版本 → 解析/归一化 → 候选入队 → 质量评价 → 发布/审核/恢复 | `src/server/services/knowledge-agent.ts` |
-| **旧聊天循环** | 用户消息 → 记忆检索 → AI 流式响应 → 工具调用；属于 LKA-001 待删除范围 | `src/features/chat/handler.ts` |
 | **待审计队列** | 候选记忆写回前暂存的 SQLite 队列，按 `memoryId` 串行消费 | `src/server/services/memory-service.ts` |
 | **LLMWiki** | Markdown + YAML frontmatter 格式，每条记忆自包含 | `src/lib/storage/markdown-formatter.ts` |
 | **向量召回** | SQLite 保存向量真源 + USearch HNSW ANN；版本失配自动重建，JS 精确扫描仅作降级 | `src/lib/vector/retriever.ts` / `src/lib/vector/backend.ts` |
 | **图谱关系** | 文件内 `[[wikilink]]` 构建的内存索引，替代图数据库边表 | `src/lib/graph/wiki-graph.ts` |
-| **降级模式** | LLM API 不可用时切换为本地检索模板回复，Embedding 不可用时降级为关键词匹配 | `src/lib/ai/model-adapter.ts` |
-| **工具系统** | Zod schema 校验 + 异步执行器，结果分层为 `content`（给模型）和 `data`（给 UI） | `src/lib/ai/tool-caller.ts` |
-| **会话系统** | 前端内存维护当前状态，服务端 JSONL 作为持久化真源；系统消息不保存（恢复时重建） | `src/components/chat/useChatSession.ts` / `src/server/services/chat-session-service.ts` |
+| **来源版本** | 规范来源 ID + 内容 revision + 稳定 event ID，未变化重扫成为无操作 | `src/lib/source/source-revision.ts` |
+| **处理进度** | 每个来源事件以 `AgentProgressEvent` 持久化阶段、结果、耗时和降级能力 | `src/types/agent.ts` / `src/server/services/knowledge-agent.ts` |
+| **降级模式** | LLM 不可用时依赖模型的候选转审核，Embedding 不可用时降级为关键词匹配 | `src/lib/ai/knowledge-model-adapter.ts` |
 | **提供商目录** | `providers.json` 声明式注册 AI 提供商和模型，零代码接入新端点 | `src/config/providers.json` |
 | **存储路径热重载** | 数据库路径固定（env），笔记路径存 db 配置表可在设置面板修改并自动迁移 | `src/lib/storage/path-resolver.ts` |
 | **工具会话采集** | 监听 Cursor/Codex/Claude Code 工作目录，解析会话文件自动入队 | `src/server/watchers/tool-dir-watcher.ts` |
-| **用户画像演化** | 对话后自动分析画像，相似度 < 0.85 才回写，变更历史记 jsonl 供前端可视化 | `src/server/services/profile-updater.ts` |
-| **浏览器采集** | 定时 copy Chrome/Edge 的 History SQLite，按域名分组总结成笔记 | `src/lib/browser/history-collector.ts` |
 | **多路召回** | 原句 + budget 模型改写变体并行检索、按最高相似度合并去重；改写失败自动退回单路 | `src/lib/vector/query-expansion.ts` / `query-rewriter.ts` |
 | **记忆纠错闭环** | 定位目标记忆 → budget 模型按指令改写 → 变更经审计队列落库并打 `corrected` 标签 | `src/lib/memory/correction.ts` |
 | **检索评测** | 固定评测集上的 Recall@k / MRR 回归基线，报告写入 `evals/reports/`，`npm run eval` 触发 | `src/eval/retrieval-eval.test.ts` |
@@ -30,17 +27,17 @@
 
 以下 7 条是可逐条验证的架构约束，新代码应逐条对照审核：
 
-1. **核心零 UI 依赖**：`src/features/` 和 `src/lib/` 不导入 React 组件、Next.js 路由细节或 CSS 模块。核心通过 `AiEvent` 流输出，UI 消费事件。
+1. **核心零 UI 依赖**：`src/features/` 和 `src/lib/` 不导入 React 组件、Next.js 路由细节或 CSS 模块。核心以来源事件、进度事件和领域对象为契约。
 
-2. **事件是唯一契约**：快轨层 Agent 循环只通过 `ReadableStream<AiEvent>` 输出，前端只通过消费同一事件流来更新 UI。不引入框架特定的回调、全局 emitter 或状态管理库的跨层耦合。
+2. **事件是唯一契约**：采集入口统一产生 `SourceRevisionEvent`，知识循环统一记录 `AgentProgressEvent`。不引入框架特定回调、全局 emitter 或跨层 UI 状态耦合。
 
-3. **工具 = Zod schema + 异步执行器**：`tool-schemas.ts` 定义校验，`tool-registry.ts` 注册执行器，`tool-caller.ts` 调度。无全局变量、无装饰器、无代码生成。工具结果分层为 `content`（给模型读的自然语言）和 `data`（给 UI/日志的结构化元数据）。
+3. **来源适配器显式化**：来源请求先经 Zod 校验，再由文件/工具会话 parser 和 adapter 归一化，最后进入 `KnowledgeAgent`。无全局注册器、装饰器或聊天工具执行平台。
 
-4. **存储不可变追加**：记忆和会话记录采用追加式日志（Markdown 文件追加 + JSONL 行追加），不修改已写入的数据。冲突通过新条目标记解决，不覆盖旧数据。待审计队列 `pending_events` 按 `memoryId` 串行消费。
+4. **审计后发布**：候选先追加到 SQLite `pending_events`，只有自动接受或人工接受后才能发布规范 Markdown。冲突和历史版本单独保存，同一 `memoryId` 串行消费。
 
-5. **系统配置重建而非快照**：持久化会话时不保存 system 角色消息。恢复会话时从当前 `PromptCache` 和工具注册表重建系统提示，确保升级配置后旧会话也受益。
+5. **稳定身份与可恢复性**：来源、来源版本、事件和知识单元使用稳定 ID；进程中断后沿用原事件恢复并递增 attempt，未变化来源不得重复生成候选。
 
-6. **模型边界显式化**：知识加工 AI 调用经过不含聊天事件类型的 `KnowledgeModelAdapter`；旧聊天流暂由 `ModelAdapter` 兼容并在 LKA-001 Phase 5 删除。LLM/Embedding API 不可用时降级状态必须在前端可见。提供商通过 `providers.json` 声明式注册，零代码接入新端点。
+6. **模型边界显式化**：知识加工 AI 调用只经过不含聊天事件类型的 `KnowledgeModelAdapter`。LLM/Embedding API 不可用时降级状态必须可见，提供商通过 `providers.json` 声明式注册。
 
 7. **文档跟随实现，差异有记录**：AGENTS.md 的偏差表（11.1）持续维护。任何与规范的偏差都必须记录在表中，附上优先级和预期修复版本。每个 Phase 结束必须更新偏差表和路线图。
 
@@ -66,14 +63,13 @@
 - 文件监听：`chokidar`，监控 `memory-root/` 目录下 Markdown 文件变化，自动触发记忆导入与更新
 - 后台 API 监听：`/api/listen` 端点，接收来自 Trae IDE、浏览器 AI 会话等外部工具的对话数据，自动提炼为结构化笔记
 - 后台任务：Route Handlers、Node.js 任务、站内调度器；Cron 仅作为可选部署形态
-- 外部能力接入：MCP 和 skills 兼具双重角色——既是数据采集输入源（从 Notion、浏览器历史、邮件等外部数据源采集信息生成记忆），又是能力调用输出方（把记忆检索结果提供给其他工具和上下文）；浏览器侧采集接口作为补充输入源
+- 外部能力接入：目标版本只保留本地文件、开发工具会话目录和 `/api/listen` 类型化采集入口；MCP、Skills 和浏览器历史采集运行时已删除
 
 ## 4. 项目结构与链路
 
 ### 4.1 结构层定义
-项目按职责分为四个处理面：
-- 入口层：前端交互、提示词编辑、记忆模式控制。
-- 快轨层：低延迟响应与即时流式输出。
+项目按职责分为三个处理面：
+- 入口层：来源配置、人工导入、审核、检索与阅读。
 - 后台加工层：JSON 清洗、分类、索引构建、记忆提取。
 - 审计持久化层：差异比对、冲突处理、写回与版本管理。
 
@@ -81,33 +77,25 @@
 ```txt
 src/
 ├─ app/
-│  ├─ page.tsx                  # 入口页，对应前端 UI
+│  ├─ (main)/page.tsx           # 来源状态、审核与快速检索首页
 │  ├─ layout.tsx                # 全局布局
 │  └─ api/
-│     ├─ chat/route.ts          # 快轨对话入口
-│     ├─ chat/stream/route.ts   # 流式对话入口
 │     ├─ memory/route.ts        # 记忆读写入口
 │     ├─ memory/[id]/route.ts   # 单条记忆操作
 │     ├─ memory/search/route.ts # 记忆搜索
-│     ├─ prompt/route.ts        # 提示词更新入口
-│     ├─ prompt/[id]/route.ts   # 单条提示词操作
 │     ├─ ingest/route.ts        # 后台数据接入入口
 │     ├─ listen/route.ts        # 外部工具监听入口（Trae/浏览器 AI 会话）
 │     ├─ audit/route.ts         # 审计入口
 │     ├─ audit/conflicts/route.ts # 冲突管理
-│     └─ config/                # 配置管理（AI/MCP/Skills）
+│     └─ config/                # 配置管理（AI/存储/工具来源）
 ├─ components/
-│  ├─ chat/                     # 人机交互组件
-│  ├─ prompt/                   # 提示词编辑组件
-│  ├─ memory/                   # 记忆模式相关组件
-│  ├─ profile/                  # 用户画像面板（画像展示 + 演化时间线）
-│  ├─ settings/                 # 设置页面组件（AI 配置、存储路径、工具采集、MCP、Skills）
+│  ├─ memory/                   # 知识检索、详情与图谱组件
+│  ├─ settings/                 # AI、存储路径与工具来源设置
 │  ├─ common/                   # 公共组件
 │  ├─ ui/                       # Magic UI / Aceternity UI 炫酷组件
 │  └─ audit/                    # 审计相关组件
 ├─ features/
-│  ├─ chat/                     # 快轨逻辑
-│  ├─ prompt/                   # 提示词读写与回写
+│  ├─ agent/                    # Agent 状态迁移
 │  ├─ memory/                   # 记忆处理、分类、评分
 │  ├─ ingest/                   # 后台输入接入与解析
 │  │  ├─ parser.ts
@@ -117,11 +105,9 @@ src/
 │  └─ audit/                    # 审计、diff、冲突处理
 ├─ lib/
 │  ├─ ai/                       # Vercel AI SDK 与模型适配
-│  ├─ mcp/                      # MCP 接入
-│  ├─ skills/                   # skills 接入
+│  ├─ source/                   # 来源版本与稳定身份
 │  ├─ memory/                   # 记忆抽象
 │  ├─ tools/                    # 工具会话解析器（Codex/Claude Code/Cursor/Markdown/Text）
-│  ├─ browser/                  # 浏览器采集（Chrome/Edge 历史与书签）
 │  ├─ vector/                   # 向量索引与检索
 │  ├─ graph/
 │  │  ├─ wiki-graph.ts          # 文件级 wikilink 图谱（主）
@@ -136,7 +122,6 @@ src/
 │  │  ├─ file-manager.ts
 │  │  ├─ lock.ts
 │  │  └─ index-writer.ts
-│  ├─ prompt/                   # 提示词模板与处理
 │  └─ utils/                    # 通用工具
 ├─ server/
 │  ├─ services/                 # 服务编排
@@ -155,15 +140,13 @@ docs/
 next.config.js                  # Next.js 配置，启用 instrumentationHook
 ```
 
-入口层 -> `src/app/page.tsx` -> `src/components/chat/*` / `src/components/prompt/*` -> `src/features/chat/*` / `src/features/prompt/*`
-
-快轨层 -> `src/features/chat/*` -> `src/lib/ai/*` -> `src/app/api/chat/route.ts` -> 流式输出
+入口层 -> `src/app/(main)/page.tsx` -> 来源状态 / 审核 / 检索入口 -> 对应 API route
 
 后台加工层 -> `src/app/api/ingest/route.ts` -> `src/features/ingest/*` -> `src/server/pipelines/*` -> `src/features/memory/*` -> `src/lib/vector/*` / `src/lib/graph/*`
 
 审计持久化层 -> `src/app/api/audit/route.ts` -> `src/features/audit/*` -> `src/server/schedulers/*` -> `src/server/workers/*` -> `src/lib/storage/*`
 
-持久化层属于审计持久化层的落盘子链路：`src/lib/storage/*` -> 本地文件 / 索引 / 标签 -> `src/features/prompt/*` -> `src/components/prompt/*` -> 前端状态同步
+持久化层属于审计持久化层的落盘子链路：`src/lib/storage/*` -> Markdown / SQLite / 索引 -> 检索与审核页面读取
 
 文件监听链路 -> `instrumentation.ts` -> `src/server/listener/listener-service.ts` -> `src/server/watchers/file-watcher.ts` -> `src/features/ingest/*` -> `src/server/services/memory-service.ts` -> 记忆写入 + 向量生成
 
@@ -174,7 +157,7 @@ next.config.js                  # Next.js 配置，启用 instrumentationHook
 - 监听窗口：系统可接收外部输入的来源窗口，包含三种渠道：
   - **API 监听**：`/api/listen` 端点，Trae IDE、浏览器 AI 页面等外部工具通过 HTTP POST 发送结构化对话数据
   - **文件监听**：`memory-root/` 目录，自动检测 Markdown 文件新增/修改并导入
-  - **前端交互**：Web UI 的聊天面板、记忆导入、设置页面
+  - **前端交互**：Web UI 的记忆导入、来源设置和审核页面
 - 短时记忆：当前主题下的高频摘要与要点，存放在 `notes/*/Agent.md`。
 - 长时记忆：可追溯的具体事实与事件，存放在 `notes/*/note-*.md`。
 - 索引地图：记录目录、标签、关系入口和引用路径的 `index-map.md`。
@@ -185,56 +168,47 @@ next.config.js                  # Next.js 配置，启用 instrumentationHook
 - API 降级：当模型 API（LLM 或 embedding）不可用时，系统自动切换到有限功能的备用模式，保证本地数据操作不受影响。
 
 ### 4.4 分层关系
-- 入口层负责接入用户输入和控制模式。
-- 快轨层负责即时响应，不直接写入持久化文件。
+- 入口层负责接入来源配置、人工导入、审核动作和检索请求。
 - 后台加工层负责结构化处理、索引构建和候选记忆生成。
 - 审计持久化层负责比对、冲突解决、版本化写回和落盘。
 - 持久化层是审计持久化层内部的存储实现，不是独立的第五层。
 
 ### 4.5 分层职责
 **入口层**
-- 收集用户输入
-- 控制记忆模式
-- 编辑和同步提示词
+- 配置并观察本地文件与工具会话来源
+- 提交人工导入和审核决定
+- 浏览、筛选和检索已发布知识
 
-**快轨层**
-- 处理即时对话
-- 维持低延迟流式回复
-- 只消费标准化事件的即时字段，不直接修改最终落盘文件
+#### 4.5.1 KnowledgeAgent 循环
 
-#### 4.5.1 快轨层 — Agent 循环引擎
-
-Agent 循环是快轨层的核心引擎，它将用户消息、记忆检索和 AI 流式响应编织为统一的进度事件流。
+KnowledgeAgent 是后台加工与审计发布的显式编排边界，将来源版本转换为可恢复、可观察的知识处理进度。
 
 **职责**
 
-1. 接收用户消息、会话 ID、记忆模式（`ChatMode`）和可选关联记忆 ID 列表。
-2. 执行意图分类（`AgentDispatcher.dispatch()`），将请求路由到记忆创建/查询/删除/更新等分支，或进入通用对话管线。
-3. 通过 `VectorRetriever.search()` 检索语义相关记忆，通过 `WikiGraph.getNeighbors()` 扩展图谱关联上下文。
-4. 组装系统提示：注入记忆摘要、用户画像（`profile.md`）、工具清单和对话历史。
-5. 通过 `ModelAdapter` 请求 AI 提供商流式返回响应，统一适配 OpenAI / Anthropic 等供应商差异。
-6. 在文本增量（delta text）和工具调用到达时，发出标准化的 `AiEvent` 事件流。
-7. 执行工具调用：记忆读写、向量检索、图谱查询等，追加工具结果到上下文。
-8. 持续迭代直到助手不再产生工具调用，或达到最大轮次限制。
-9. 将最终助手消息和候选记忆（`PendingEvent`）提交到后台加工层的待审计队列。
+1. 接收带稳定 `sourceId`、`revision` 和 `eventId` 的 `SourceRevisionEvent`。
+2. 选择 parser，完成解析、归一化和候选提取。
+3. 将候选作为 `PendingEvent` 入队，并持久化每个 `AgentProgressEvent`。
+4. 通过质量闸门得到 `accept`、`review` 或 `reject`。
+5. 接受后发布 Markdown、关键词/向量索引和图谱关系；不确定时等待人工审核。
+6. 失败时记录可重试状态，进程恢复后沿用原事件继续。
 
 **非职责**
 
-Agent 循环不知道 Next.js 路由细节、React 组件、会话文件落盘位置、MCP/Skills 配置或 `memory-root/` 目录结构。这些属于入口层、持久化层和配置管理模块。
+KnowledgeAgent 不依赖 React 或 Next.js Route Handler，也不提供通用聊天、会话、MCP 或 Skills 执行能力。
 
 **关键实现**
 
 | 组件 | 路径 | 角色 |
 |------|------|------|
-| `AgentDispatcher` | `src/features/agent/dispatcher.ts` | 意图分类与路由派发 |
-| `ChatHandler` | `src/features/chat/handler.ts` | 循环主控：检索 → 构建提示 → 流式调用 → 事件流 |
-| `ModelAdapter` | `src/lib/ai/*` | 供应商适配层：流式输出、工具调用、降级处理 |
+| `KnowledgeAgent` | `src/server/services/knowledge-agent.ts` | 来源版本、阶段迁移、审核发布与恢复主控 |
+| `KnowledgeModelAdapter` | `src/lib/ai/knowledge-model-adapter.ts` | 结构化生成、Embedding 与降级状态 |
+| `SourceRegistry` | `src/server/services/source-registry.ts` | 来源版本、健康状态和处理时间持久化 |
 | `VectorRetriever` | `src/lib/vector/retriever.ts` | 向量语义召回 |
 | `WikiGraph` | `src/lib/graph/wiki-graph.ts` | `[[wikilink]]` 图谱邻接扩展 |
 
 **事件优先设计**
 
-每个有意义的步骤都通过 `AiEvent` 观察 —— 文本增量、工具调用请求、工具结果、错误和完成信号。前端通过 `EventSource` / `fetch` streaming 消费同一事件流来更新 UI，确保 Agent 循环核心与渲染层解耦。
+每个有意义的步骤都写入 `AgentProgressEvent`，包含来源、版本、事件、阶段、attempt、耗时、结果、错误和降级能力。前端通过只读状态 API 获取同一契约。
 
 **后台加工层**
 - 接收归一化后的事件对象
@@ -248,24 +222,24 @@ Agent 循环不知道 Next.js 路由细节、React 组件、会话文件落盘�
 - 对候选记忆与现有记忆进行差异比对，按冲突分级策略处理（详见 4.10）
 - 统一负责本地文件写回、SQLite 索引更新、版本管理和失败重试
 - 写回完成后从队列中删除对应 `PendingEvent`，失败时保留并重试
-- 处理快轨与后台加工之间的不一致合并
+- 处理候选状态与已发布知识之间的不一致合并
 
 ### 4.6 接口与实现约束
 - UI 组件：React、Next.js、Tailwind CSS、shadcn/ui
 - 状态管理：React Context，用于轻量共享状态；跨页面持久状态由本地存储或服务端缓存承载
-- AI 调用：`src/lib/ai/*`，统一流式输出和工具调用接口
+- AI 调用：`KnowledgeModelAdapter` 提供结构化文本生成、Embedding 和降级状态
 - 输入归一化：`src/server/pipelines/*`，将多源输入整理为标准事件对象
 - JSON 校验：Zod，用于请求体、记忆结构和回写结果校验
 - 校验顺序：先定义 `schema`，再定义 `zodSchema`，再定义 `parse` / `safeParse`，最后才允许进入业务处理函数
 - 请求响应约束：所有 API route 的请求体 schema、响应体 schema 和错误码表统一登记在 `src/config/api-route-contracts.ts`；route handler 实现侧继续在入口执行 Zod 请求校验，避免受 Next.js route module 导出限制影响
 - 批处理与调度：Node.js 任务与站内调度器；Cron 仅作为可选部署形态
 - 前端搜索：关键词索引、笔记检索、结果排序、点击回写
-- 本地推荐：按次数推荐算法、动态热度更新、个性化重排、曝光回写
-- 本地笔记存储：`src/lib/storage/*`，负责读写 `notes/*`、`index-map.md`、`profile.md` 和 `archive/*`
+- 本地排序：按相关度、质量、最近更新和明确访问行为重排，不读取推断画像
+- 本地笔记存储：`src/lib/storage/*`，负责读写 `notes/*`、`index-map.md` 和 `archive/*`
 - 记忆索引：Markdown 索引地图、标签索引、关系索引、语义检索层
 - 向量索引：`src/lib/vector/*`，负责 embedding 生成、向量更新、语义相似度检索、重排、回写
 - 关系存储：`src/lib/graph/*`，负责记忆关系边和关系查询
-- 更新策略：短时记忆要点更新 `notes/*/Agent.md`，长时记忆更新 `notes/*/note-*.md`，索引地图更新 `index-map.md`，推荐权重更新 `profile.md`
+- 更新策略：主题要点更新 `notes/*/Agent.md`，知识单元更新 `notes/*/note-*.md`，索引地图更新 `index-map.md`
 - 落盘与版本：记忆正文用 Node.js 文件系统 API 写入 Markdown 文件；向量、图谱、队列和冲突记录用 SQLite 事务写入
 - 向量存储：`src/lib/vector/*` 使用 SQLite + `better-sqlite3` 驱动，通过 `vector_records` 表保存真源；搜索经 `VectorSearchBackend` 抽象，默认 USearch HNSW ANN，JS 精确扫描仅作显式/故障 fallback
 - 图谱存储：`src/lib/graph/wiki-graph.ts`（主路径）从文件扫描 `[[wikilink]]` 构建内存索引；`src/lib/graph/manager.ts`（已废弃，保留兼容）使用 SQLite 表 `graph_edges` 存储关系边
@@ -354,7 +328,7 @@ Agent 循环不知道 Next.js 路由细节、React 组件、会话文件落盘�
 ```txt
 memory-root/
 ├─ index-map.md              # 索引地图，记录所有记忆文件夹、标签和关系入口
-├─ profile.md                # 个性标签 + 个性提示词
+├─ profile.md                # 旧版本遗留数据（可保留，生产代码不再读写）
 ├─ memory.db                 # SQLite 数据库：向量索引、关系图谱、待审计队列、冲突记录
 ├─ notes/                    # 具体记忆内容文件夹集合
 │  ├─ topic-a/
@@ -374,18 +348,17 @@ memory-root/
 ### 4.8 记忆链路
 - `MemoryRecord` 是主数据对象；一条记忆在文件层对应一份 `notes/*/note-*.md`，其 JSON 形态作为写回前后的规范中间表示。
 - `index-map.md` 由审计持久化层在目录结构变化、标签变化或关系变化后更新，用于记录目录总索引、父子关系、标签入口和引用路径。
-- `profile.md` 由审计持久化层在个性标签、偏好参数或检索偏置变化后更新。
 - `notes/*/Agent.md` 由审计持久化层在该目录下新增、修改或删除 `note-*.md` 后同步更新，保存该目录的短时记忆要点。
 - `notes/*/note-*.md` 由写回流程生成或覆盖，保存实际记忆内容、来源信息、创建时间和更新时间。
 - `archive/*` 由审计持久化层在版本快照、冲突回滚或人工保留历史时写入，历史快照必须带时间戳。
-- 读取顺序固定为 `index-map.md` -> `profile.md` -> `notes/*/Agent.md` -> `notes/*/note-*.md` -> `archive/*`。
-- 写回顺序固定为先写 `notes/*/note-*.md`，再同步对应 `notes/*/Agent.md`，必要时更新 `index-map.md` 和 `profile.md`，最后写入 `archive/*` 快照。
+- 读取顺序固定为 `index-map.md` -> `notes/*/Agent.md` -> `notes/*/note-*.md` -> `archive/*`。
+- 写回顺序固定为先写 `notes/*/note-*.md`，再同步对应 `notes/*/Agent.md`，必要时更新 `index-map.md`，最后写入 `archive/*` 快照。
 - 进入审计持久化层前必须先进入待审计队列；同一 `memoryId` 的事件按顺序串行处理，避免并发覆盖。
 - 待审计队列存储于 `memory-root/memory.db` 的 `pending_events` 表，每条记录包含 `eventId`、`memoryId`、`sourceType`、`candidate`（候选 `MemoryRecord` 的 JSON 序列化）、`changedFields`（变更字段列表）、`createdAt`、`status`（`pending` | `processing` | `done` | `failed`）和 `retryCount`（完整字段见 5.6）。
 - 消费顺序：按 `memoryId` 分组，组内按 `createdAt` 升序串行消费；不同 `memoryId` 可并行处理。
 - 写回成功后 `status` 置为 `done` 并保留记录 24 小时用于审计追溯，之后自动清理；失败时 `status` 置为 `failed` 并触发重试流程。
-- 快轨层在后台加工未完成时，允许展示未经审计的候选结果作为即时反馈，但必须标注为"未审计"状态，避免与最终落盘记忆混淆。
-- 快轨只负责产生候选结果和即时反馈，后台加工负责结构化补全，最终文件只在审计持久化层写入。
+- 状态页可以展示候选的当前阶段，但未经审计内容必须标注为候选，不得混入正式知识库。
+- 后台加工负责结构化补全，最终文件只在审计持久化层写入。
 - 搜索回写由前端搜索命中事件触发，只更新点击次数、最近访问时间和相关标签。
 - 推荐回写由推荐曝光事件触发，只更新曝光次数、热度和时间衰减权重。
 - 向量回写由记忆新增或内容变更事件触发，先生成 `VectorRecord`，再同步向量索引。
@@ -422,10 +395,10 @@ memory-root/
 - `snapshotPath` 只保存归档文件路径，不保存业务正文。
 
 ### 4.11 模型与检索约束
-- `Mini LLM` 用于快轨抽取、分类和摘要，优先选择低延迟模型；`Pro 模型` 用于审计、冲突处理和重写，优先选择高质量模型。
-- 模型选择规则：当单次处理目标为低延迟流式回复时使用 `Mini LLM`，当任务涉及审计、冲突消解、写回重写或高风险内容处理时使用 `Pro 模型`。
+- `budget` 模型用于查询改写和低成本整理，`standard` 模型用于结构化提取与话题复核，`flagship` 模型用于质量评价和高风险知识维护。
+- 模型选择规则按知识任务的成本与风险显式选择，不提供聊天响应路由。
 - 模型 API 通过中转站适配层调用，配置定义在 `src/config/api.config.ts`，包含：中转站 `baseURL`、`apiKey`（从环境变量 `MODEL_API_KEY` 读取，不硬编码）、Mini LLM 和 Pro 模型的模型名称、embedding 模型名称和维度、请求超时时间（默认 30 秒）和最大重试次数（默认 2 次）。
-- API 降级策略：当 LLM API 不可用时（网络错误、超时、认证失败），快轨层切换为基于本地检索的模板回复（不调用 LLM 生成），后台加工层暂停记忆提取任务并排队等待恢复；当 embedding API 不可用时，向量召回降级为关键词召回，新记忆仍写入文件但标记为"向量待生成"，恢复后批量补建。
+- API 降级策略：LLM 不可用或输出非法时，依赖模型的候选 fail-closed 转入 `review`；embedding 不可用时，检索降级为关键词通道，待恢复后补建向量。
 - 降级状态必须在前端展示明确提示，告知用户当前处于降级模式及影响范围。
 - 向量模型默认使用 `text-embedding-3-small`（维度 1536）；embedding 模型配置通过 `EmbeddingModelConfig`（见 5.5）管理，更换模型时必须同步更新维度约束和重建全部向量索引。
 - 向量真源持久化于 `memory-root/memory.db` 的 `vector_records` 表；HNSW 加速图保存为同目录的 `memory.db.ann-{dimensions}.usearch`，通过 SQLite sourceVersion 校验一致性，失配或损坏时自动重建；查询经 `src/lib/vector/backend.ts` 后端接口执行
@@ -444,107 +417,31 @@ memory-root/
 
 ### 4.13 结构原则
 - UI、业务、存储三层分离。
-- 快轨与后台加工分离。
+- 来源接入、后台加工与审计发布分离。
 - 模型调用与业务逻辑分离。
 - 持久化写回和前端展示分离。
 - 所有链路必须可从文件树直接定位到职责模块。
 
-### 4.14 工具系统
+### 4.14 来源适配系统
 
-工具让 AI 助手通过结构化调用来读写记忆、检索向量、查询图谱和操作文件。
+目标产品不提供聊天型工具执行平台。外部输入通过类型化来源适配器进入统一知识循环：
 
-Auto-Memeries-Doll 将工具定义与 UI 层分离：
-
-- `src/lib/ai/*` 定义 Vercel AI SDK 层、与提供商无关的工具类型和执行器。
-- `src/features/chat/handler.ts` 通过 `registerDefaultTools()` 注册内置工具并注入到系统提示。
-- 前端（ChatInterface）仅消费工具调用事件，不感知工具实现细节。
-- MCP 和 Skills 作为外部工具扩展点，通过 `src/lib/mcp/*` 和 `src/lib/skills/*` 接入。
-
-**核心模型**
-
-工具基于 Vercel AI SDK 的 `tool()` 辅助函数定义，每个工具包含：
-
-- `description`：自然语言描述，写入系统提示供模型选择调用时机
-- `inputSchema`：Zod schema，定义参数类型和约束
-- `execute`：异步执行器，接收校验后的参数，返回 `{ content, data }` 结构
-
-工具执行结果由 Agent 循环捕获，转换为 `ToolResultMessage` 追加到对话上下文。
-
-**内置工具**
-
-`ChatHandler.registerDefaultTools()` 注册五类本地工具：
-
-| 工具 | 用途 | 实现位置 |
-|------|------|----------|
-| `create_memory` | 创建新记忆记录（含向量生成和图谱链接） | `src/features/agent/dispatcher.ts` → `MemoryService` |
-| `search_memories` | 混合检索：关键词 + 向量 + 标签过滤 | `src/lib/vector/retriever.ts` |
-| `update_memory` | 增量更新已有记忆 | `src/features/agent/dispatcher.ts` |
-| `delete_memory` | 删除记忆（移入 archive） | `src/features/agent/dispatcher.ts` |
-| `query_graph` | 图谱邻接查询，获取关联记忆 | `src/lib/graph/wiki-graph.ts` |
-
-**工具调用流程**
-
-1. Agent 循环将当前工具清单注入系统提示。
-2. AI 模型在需要时返回 `tool_calls`，包含工具名和 JSON 参数。
-3. Agent 循环用 Zod schema 校验参数，失败时返回错误信息给模型。
-4. 执行工具，将 `{ content }` 作为 `tool` 角色消息追加到上下文。
-5. 模型基于工具结果继续推理或返回最终回复。
-6. 最大工具调用轮次受 `maxToolCalls` 限制，超限后强制返回文本回复。
-
-**扩展工具**
-
-- **MCP 工具**：通过 `src/lib/mcp/` 接入外部 MCP 服务器，动态注册远端工具。
-- **Skills 工具**：通过 `src/lib/skills/` 加载自定义技能脚本，在 Agent 循环中作为特殊工具调用。
-- 扩展工具和内置工具统一出现在工具清单中，模型不感知工具来源。
-
-**非职责**
-
-工具层不知道 Next.js 路由细节、`memory-root/` 目录结构、或前端 Tab 切换逻辑。这些属于入口层和持久化层。
-
-### 4.15 会话系统
-
-会话管理对话上下文和消息历史，在一次或多次人机交互中维持状态连续性。
-
-**设计**
-
-Auto-Memeries-Doll 的会话采用“前端内存状态 + 服务端追加式 JSONL”模型：
-
-- `sessionId` 由前端生成，通过请求体传递给 API。
-- 当前消息历史保存在 React state；每次对话请求仍携带完整 `messages` 数组。
-- 服务端在请求开始和 AI 回答结束时向 `memory-root/sessions/{sessionId}.jsonl` 追加快照，JSONL 是恢复与列表的唯一真源。
-- 系统消息不写入快照，恢复后由当前 `ChatHandler` 配置重建。
-- `ChatMode`（`chat` | `memory` | `prompt`）随会话快照保存；localStorage 只保留界面偏好与一次性迁移标记。
-
-**职责**
-
-- 维护当前会话的消息列表（user / assistant / system 角色）。
-- 在每次请求时将完整对话历史发送给 API。
-- 支持流式响应中增量追加 assistant 消息。
-- 通过 `/api/chat/sessions` 提供会话列表、恢复、追加快照、删除标记和旧 localStorage 迁移。
-- 管理 `ChatMode` 切换：`chat` 模式仅对话，`memory` 模式启用记忆检索和写回工具。
-
-**非职责**
-
-会话系统不负责：
-- 实时同步多个已打开标签页中的当前 UI 状态。
-- 多会话分支和树状回放（不在当前路线图中）。
-- 系统提示的版本管理（每次请求从当前配置重建）。
-
-**边界**
-
-- 会话状态管理属于 `src/components/chat/useChatSession.ts`。
-- JSONL 的追加、读取和投影属于 `src/server/services/chat-session-service.ts`。
-- HTTP 查询与迁移入口属于 `src/app/api/chat/sessions/`。
-- 消息序列化和 API 传输属于快轨层（`ChatHandler.streamResponse()`）。
-- 会话不干预记忆持久化；记忆写回始终通过审计持久化层。
-
-**当前限制**
-
-| 限制 | 影响 | 计划 |
+| 来源 | 入口 | 处理 |
 |------|------|------|
-| 快照重复完整消息 | 长会话的 JSONL 文件增长较快 | 后续增加压缩/归档，不修改既有行 |
-| 多标签页无实时通知 | 一个 Tab 的列表变更不会立即推送到另一个 Tab | 切回页面时刷新，后续可增加轻量通知 |
-| 无分支/回放 | 无法回溯历史决策路径 | 非当前优先级 |
+| Markdown / Text | `file-watcher.ts` | 稳定窗口、来源版本、解析与归一化 |
+| Codex / Claude Code / Cursor | `tool-dir-watcher.ts` | `session-parser.ts` 提取会话内容后归一化 |
+| 外部结构化会话 | `POST /api/listen` | Zod 校验后构造 `SourceRevisionEvent` |
+| 人工导入 | `POST /api/ingest` | 解析、去重并提交候选 |
+
+MCP 与 Skills 运行时已在 LKA-001 Phase 5 删除。未来若重新接入，只能作为有明确 schema、来源身份和 revision 的采集适配器，不得恢复通用工具调用平台。
+
+### 4.15 旧会话数据策略
+
+通用聊天与会话恢复不属于目标产品，相关页面、API 和运行时代码已删除。迁移遵循非破坏原则：
+
+- 不主动扫描、修改或删除用户已有 `memory-root/sessions/*.jsonl`。
+- 旧会话可以继续作为开发工具来源文件导入，但必须经过来源版本、去噪、质量审核和发布流程。
+- 生产启动链、导航和 API 契约不得重新依赖旧会话目录。
 
 ## 5. 数据类型
 系统维护以下七类本地数据。
@@ -705,14 +602,13 @@ export type ConflictRecord = {
 - 存储于 SQLite 表 `conflict_records`，支持按 `status` 和 `memoryId` 查询。
 
 ## 6. 处理策略
-- 新增功能前先判断属于快轨、后台加工还是审计持久化。
-- 快轨只做即时回复、轻量抽取和候选生成，不写最终文件。
+- 新增功能前先判断属于入口、后台加工还是审计持久化。
 - 后台加工负责归一化、去重、分类、索引构建和候选记忆生成，结果先进入待审计队列。
 - 审计持久化负责冲突消解、版本管理、回滚和最终落盘。
 - 处理 JSON 时先做拆分、去重、格式化，再进入索引与评分。
 - 涉及写回时必须明确区分”增量更新”和”覆盖写入”。
 - 冲突分级处理：审计层收到候选记忆后，按 4.10 定义的冲突分级策略进行差异比对和处理。
-- API 降级处理：LLM API 不可用时，快轨层切换为本地检索模板回复，后台加工层暂停提取并排队；embedding API 不可用时，向量召回降级为关键词召回，新记忆标记”向量待生成”并在恢复后批量补建；降级状态须在前端提示。
+- API 降级处理：LLM API 不可用时，依赖模型的候选转人工审核；embedding API 不可用时，向量召回降级为关键词召回并在恢复后补建；降级状态须在前端提示。
 - API 开发规范：所有 API 应先在 `src/config/api-route-contracts.ts` 登记请求体 Zod schema（无请求体可省略）、响应体 schema 和错误码枚举，再写 route handler；handler 内必须继续执行请求体 Zod 校验。
 - 并发写入本地文件时必须通过单写入队列或文件锁保证顺序；同一 `memory-root/` 下的写入任务不得并行覆盖同一目标文件。
 - 后台任务失败时必须保留失败上下文，并允许重试；重试前必须保留原始输入和上一次处理结果。
@@ -726,7 +622,7 @@ export type ConflictRecord = {
 - 失败上下文默认写入 `memory-root/archive/failures/`，文件名必须包含 `memoryId`、阶段标识和时间戳。
 - 重试策略默认采用最多 3 次重试，间隔分别为 1 分钟、5 分钟、20 分钟；退避算法采用指数退避并叠加随机抖动。
 - 幂等任务允许在检测到相同输入快照时直接复用上一次成功结果，不重复写入最终文件。
-- API 调用失败（LLM 或 embedding）不消耗业务重试次数，单独管理：LLM 失败时快轨层降级为模板回复，后台加工层暂停并等待恢复轮询（每 30 秒检测一次）；embedding 失败时标记记忆为"向量待生成"，不影响文件写入和关键词检索。
+- API 调用失败（LLM 或 embedding）与业务重试分开管理：LLM 失败时将不确定候选置为 `review` 并等待恢复；embedding 失败不影响关键词检索，恢复后补建向量。
 - API 连续失败超过 10 分钟时，在前端持久提示降级状态，直到恢复检测成功。
 - 当同一任务连续失败达到重试上限，或者检测到版本冲突、schema 不兼容、数据损坏时，必须触发人工接管。
 - 人工接管条件包括：自动重试耗尽、冲突无法合并、历史快照缺失、校验失败不可修复、或用户明确要求回滚。
@@ -735,13 +631,12 @@ export type ConflictRecord = {
 ## 8. 决策点
 - 部署形态：纯本地单机，不考虑多用户隔离和远程访问；进程重启后从 SQLite 恢复待审计队列和冲突记录状态。
 - 监听数据的接入形式：统一为标准化事件对象，底层输入可以来自 JSON、事件流或文件落盘，但进入系统前必须归一化。
-- 本地存储目录：使用 `memory-root/` 作为根目录，结构以 `index-map.md`、`profile.md`、`memory.db`、`notes/*` 和 `archive/*` 为准。
+- 本地存储目录：使用 `memory-root/` 作为根目录，结构以 `index-map.md`、`memory.db`、`notes/*` 和 `archive/*` 为准；旧 `profile.md` 可以原位保留但不再由生产代码读写。
 - 存储方案：记忆正文用 Markdown 文件（人类可读、可直接编辑）；向量索引、关系图谱、待审计队列和冲突记录用 SQLite（结构化查询、事务保证、单文件便于备份）。
-- MCP 与 skills 接入边界：兼具数据采集输入源和能力调用输出方双重角色；作为输入源时不直接绕过审计持久化层写入最终文件；作为输出方时只读取已审计记忆的摘要和引用路径，不暴露内部存储结构。
-- `chat/route.ts` 请求体：最小字段由 `messages`、`mode`、`sessionId` 组成，其他字段为可选扩展。
+- 外部接入边界：只接受具有明确 schema、来源身份和 revision 的采集输入，不提供 MCP/Skills 通用执行平台。
 - `memory/route.ts` 写入模式：默认采用合并写入，冲突时进入审计持久化层按冲突分级策略处理。
 - `heatScore` 计算：各子项公式和默认参数定义在 4.10 和 `src/config/scoring.config.ts`，变更参数后需重新计算全部 `heatScore`。
-- `Mini LLM` 与 `Pro 模型`：Mini LLM 负责快轨处理，Pro 模型负责审计、冲突处理和重写；两者均通过中转站适配层调用，API 不可用时按降级策略处理。
+- 模型档位：`budget`、`standard`、`flagship` 均通过 `KnowledgeModelAdapter` 调用，按知识任务成本和风险选择，API 不可用时按 fail-closed 降级策略处理。
 - 决策点应在实现前优先判断，若与已有章节冲突，则以”设计原则、处理策略、失败与重试、数据类型约束”为准。
 
 ## 9. 安全与隐私
@@ -749,7 +644,7 @@ export type ConflictRecord = {
 
 - API Key 管理：中转站 API Key 必须从环境变量 `MODEL_API_KEY` 读取，不得硬编码在源码或配置文件中；`.env` 文件必须加入 `.gitignore`。
 - 本地数据备份：`memory-root/` 目录支持整体备份（Markdown 文件 + `memory.db`）；建议提供 `导出全部记忆` 和 `导入备份` 功能，导出格式为 `memory-root/` 的 zip 压缩包。
-- 敏感信息处理：涉及外部来源原文（如邮件、聊天记录、浏览器历史）时，默认仅写入摘要和来源标识，不存储原文；如用户明确要求保留原文，必须标注为”含原文”并在 `MemoryRecord.tags` 中加入 `sensitive` 标签。
+- 敏感信息处理：涉及外部来源原文（如工具会话）时，默认仅写入必要知识和来源标识；远程模型调用前必须脱敏，敏感记录需在 `MemoryRecord.tags` 中加入 `sensitive` 标签。
 - 数据清理：用户可以单条或批量删除记忆；删除操作将记忆正文移至 `archive/deleted/`（带时间戳），同步删除向量索引和图谱关系，保留 `MemoryVersion` 快照用于恢复。
 - 日志安全：失败上下文和审计日志中不得包含 API Key、完整原文或用户隐私内容；如需包含输入快照用于调试，必须脱敏处理。
 - 进程隔离：SQLite 数据库使用文件锁保证单进程访问，不允许多个进程实例同时写入同一 `memory.db`。
@@ -757,10 +652,10 @@ export type ConflictRecord = {
 ## 10. 测试策略
 测试按层定义关注点，每层必须覆盖新增分支、写回结果或重排结果。
 
-**快轨层测试**
-- 测流式输出格式和中断恢复。
-- 测候选记忆生成逻辑：输入归一化 → 抽取 → 候选 `PendingEvent` 结构完整性。
-- 测 LLM API 不可用时的降级路径：模板回复是否正常返回、降级提示是否触发。
+**来源与 Agent 测试**
+- 测稳定来源 ID、revision、重复观察无操作和处理中断恢复。
+- 测候选生成逻辑：输入归一化 → 抽取 → `PendingEvent` 结构完整性。
+- 测 LLM API 不可用时的 fail-closed 审核路径和降级提示。
 
 **后台加工层测试**
 - 测 JSON 清洗和去重：重复输入不产生重复 `PendingEvent`。
@@ -772,7 +667,7 @@ export type ConflictRecord = {
 - 测冲突分级：自动可合并（不同字段）、需人工裁决（同字段不同值生成 `ConflictRecord`）、不可合并（schema 不兼容阻断写入）。
 - 测版本管理：写回后 `MemoryVersion` 快照生成、版本号递增、回滚后状态恢复。
 - 浘并发控制：同一 `memoryId` 串行处理、不同 `memoryId` 可并行。
-- 测写回顺序：`note-*.md` → `Agent.md` → `index-map.md` → `profile.md` → `archive/*`。
+- 测写回顺序：`note-*.md` → `Agent.md` → `index-map.md` → `archive/*`。
 - 测 `ConflictRecord` 裁决：`resolved_accept` / `resolved_keep` / `resolved_manual` 三种路径的写回结果。
 
 **持久化层测试**
@@ -781,9 +676,9 @@ export type ConflictRecord = {
 - 测备份与恢复：导出 → 删除原目录 → 导入 → 数据完整性校验。
 
 **集成测试**
-- 端到端：用户输入 → 快轨回复 → 后台加工 → 审计写回 → 前端状态同步。
-- 检索端到端：关键词 + 向量 + 标签混合召回 → MMR 重排 → 结果注入 prompt → 点击回写。
-- MCP/skills 双向：外部数据源采集 → 记忆生成 → 审计写回；已审计记忆 → MCP/skills 输出 → 外部工具消费。
+- 端到端：来源版本 → 后台加工 → 审计写回 → 前端状态同步。
+- 检索端到端：关键词 + 向量 + 标签混合召回 → MMR 重排 → 带来源结果 → 点击回写。
+- 工具会话采集：来源目录 → 会话解析 → 稳定版本 → 候选生成 → 审计写回。
 
 ## 11. 已知偏差与待办事项
 
@@ -820,7 +715,7 @@ export type ConflictRecord = {
 | 分类驱动路由未生效 | 第 4.14 节工具调用流程 + 《架构检查文档》4.4 "分类驱动路由" | 已修复：`ChatHandler.streamResponse` 调用 `ChatClassifier.classify` 对最近 user 消息做本地意图分类，结果注入 prompt 的"用户意图"块（零 LLM 开销），引导模型选择工具与回复风格 | ~~P0~~ |
 | 置信度评分为硬编码常量 | 第 4.11 节"模型与检索约束"未约束置信度算法；《架构检查文档》4.4 要求区分"高可信事实"与"待确认推测" | 已修复：`ChatClassifier`/`MemoryClassifier` 改为 `score = min(0.95, 0.5 + 0.12*命中数 + 0.05*位置加分)`，区分多关键词命中（高可信）与单关键词命中（待确认） | ~~P1~~ |
 | 审计可读文本缺失 | 第 4.10 节"冲突分级策略" + 《架构检查文档》4.7 "markdown 流式转码 + LLM 检查" | 已修复：`AuditReporter.generateMarkdownReport()` 生成按来源/话题分布 + 冲突清单 + 最近记忆的可读 Markdown；`Orchestrator.processQueue` 末尾自动落盘到 `archive/audits/audit-{timestamp}.md` | ~~P1~~ |
-| ChatHandler 职责偏重 | Agent 循环负责检索、意图、提示词、流式输出 | 已修复：系统提示组装拆到 `src/features/chat/system-prompt.ts`，`ChatHandler` 只传入 `SystemBlocks` 并消费组装结果；新增 `chat-system-prompt.test.ts` 覆盖提示块契约 | ~~P3~~ |
+| ChatHandler 职责偏重 | Agent 循环负责检索、意图、提示词、流式输出 | 历史修复；LKA-001 Phase 5 已删除 ChatHandler、系统提示组装和对应测试 | ~~P3~~ |
 | Orchestrator 审计报告 I/O 内联 | 审计持久化层应由服务拆分职责 | 已修复：审计报告落盘拆到 `src/server/services/audit-report-writer.ts`，`Orchestrator` 仅调度 `AuditReportWriter.write()`；新增独立单测覆盖路径、文件名与写入内容 | ~~P3~~ |
 | 向量搜索后端固定 JS 实现 | Phase 3 规划升级原生向量索引 | 已修复：`VectorSearchBackend` 默认使用 USearch HNSW ANN；SQLite 版本触发器检测索引失配并自动重建，按 embedding 维度分图持久化；JS 精确搜索仅作 `VECTOR_BACKEND=js` 或初始化失败 fallback；测试覆盖增删改、持久化重载和自动重建 | ~~P3~~ |
 | 画像回写无阈值 | 《架构检查文档》6.3 "回写震荡风险：自动更新 loop 如果太激进，会导致提示词频繁变化、标签漂移" | 已修复：`ProfileUpdater` 新增 `UPDATE_SIMILARITY_THRESHOLD=0.85`，新旧画像行级 Jaccard 相似度 ≥ 阈值时跳过回写，避免 `profile.md` 反复刷新导致 `PromptCache` 震荡 | ~~P2~~ |
@@ -839,7 +734,8 @@ export type ConflictRecord = {
 | 更新路径绕过质量闸门 | 旧实现仅新建记忆过质量闸门，update 事件 content 变更直接进审计 | 已修复：`Orchestrator` 更新分支在 `changedFields` 含 `content` 时同样执行向量去重 + 质量闸门（reject → rejected；review → warn 后继续审计 diff/冲突兜底） | ~~P1~~ |
 | 多入口写入无语义去重 | 旧实现仅 ingest 入口有 Jaccard 快筛，chat/listen/tool 等入口无语义去重 | 已修复：`Orchestrator` 统一入口向量语义去重（`VectorIndex.search` cosine ≥ 0.95 判重 → rejected）；一次 embedding 召回 top-K 相似记忆同时服务去重与闸门新颖性上下文（≥0.6 才注入 prompt，省 token） | ~~P1~~ |
 | review 无人工裁决出口 | 无 | 已修复：`Orchestrator.resolveReviewEvent(eventId, action)`（accept 跳闸门直接落盘，避免重新入队死循环；reject 终拒归档）+ `GET/POST /api/audit/review-events` 路由 + API 契约登记 | ~~P2~~ |
-| 产品范围与 LKA-001 目标不一致 | `docs/specs/001-local-knowledge-agent/` 将产品收缩为本地知识整理 Agent，并明确删除聊天、画像、人格 Prompt 和聊天型 MCP/Skills | Phase 4 已完成保留链路解耦；范围外功能仍存在，下一步按 LKA-001 Phase 5 删除 | P0 |
+| 产品范围与 LKA-001 目标不一致 | `docs/specs/001-local-knowledge-agent/` 将产品收缩为本地知识整理 Agent，并明确删除聊天、画像、人格 Prompt 和聊天型 MCP/Skills | 已修复：Phase 5 删除范围外页面、API、运行时、scheduler 和依赖；首页改为来源状态、审核和检索入口，旧用户数据保持原位 | ~~P0~~ |
+| Phase 5 与主题资料 API 契约顺序 | T5.8 要求增加主题学习资料契约，但 T6.1 才定义主题资料 schema，且当前没有对应路由 | 已澄清：Phase 5 只登记真实存在的来源状态路由并删除旧契约；主题资料 schema 与真实路由在 T6.1 同步登记，禁止预置 stale contract | ~~P1~~ |
 
 ### 11.2 渐进式路线图
 
@@ -911,7 +807,7 @@ Phase 5 — 检索与质量收口 [DONE]
 
 ### 11.3 LKA-001 功能收缩路线图
 
-详细规范位于 `docs/specs/001-local-knowledge-agent/`，当前阶段：**Phase 3 去噪和来源追踪**。
+详细规范位于 `docs/specs/001-local-knowledge-agent/`。Phase 5 已完成；当前可继续 Phase 3 去噪和来源追踪，并在其来源契约稳定后进入 Phase 6。
 
 ```text
 Phase 0 — 确认范围和建立基线 [DONE]
@@ -940,7 +836,11 @@ Phase 4 — 保留代码解耦 [DONE]
   [x] KnowledgeModelAdapter 与聊天 AiEvent 契约分离
   [x] nightly 删除画像更新和聊天路由优化
   [x] KnowledgeConfigService 仅持久化 AI、存储和工具来源配置，旧集成数据非破坏保留
-Phase 5 — 删除范围外功能
+Phase 5 — 删除范围外功能 [DONE]
+  [x] 删除聊天页面、API、Dispatcher、ChatHandler、AiEvent 流和会话持久化
+  [x] 删除用户画像、人格 Prompt、聊天型 MCP/Skills 和浏览器历史采集
+  [x] 首页替换为来源状态、审核队列、最近进度和快速检索
+  [x] API 契约、依赖、单测和 E2E 同步收口，旧用户数据非破坏保留
 Phase 6 — 主题学习资料生成
 Phase 7 — 用户界面重构
 Phase 8 — 验证和作品集交付
@@ -952,13 +852,14 @@ Phase 8 — 验证和作品集交付
 - LKA-001 Phase 1 已完成：新增 13 条真实存储特征测试，并修复抽取卡覆盖原始 `sourceHash` 导致未变化文件重复入队的问题；详细结果见 `docs/specs/001-local-knowledge-agent/phase-1-characterization.md`
 - LKA-001 Phase 2 已完成：新增统一来源版本、`SourceRegistry`、集中状态机、显式 `KnowledgeAgent` 与持久化进度，生产入口不再直接实例化 `Orchestrator`；详细结果见 `docs/specs/001-local-knowledge-agent/phase-2-knowledge-agent.md`
 - LKA-001 Phase 4 已完成：排序、路径、AI 契约、nightly 和配置持久化均已与待删除功能解耦；详细结果见 `docs/specs/001-local-knowledge-agent/phase-4-decoupling.md`
+- LKA-001 Phase 5 已完成：删除范围外聊天、会话、画像、Prompt、MCP/Skills 和浏览器采集运行时，首页改为知识处理概览；详细结果见 `docs/specs/001-local-knowledge-agent/phase-5-scope-removal.md`
 
-- 已完成 `ChatHandler` 系统提示拆分：`src/features/chat/system-prompt.ts`
+- 历史 ChatHandler 系统提示拆分已随 LKA-001 Phase 5 范围收缩删除
 - 已完成审计报告写入拆分：`src/server/services/audit-report-writer.ts`
 - 已完成向量搜索后端抽象：`src/lib/vector/backend.ts`
 - 已完成提供商目录化配置：`providers.json` + `provider-loader.ts` + 设置页动态选项
 - 已完成 API 契约集中登记：`src/config/api-route-contracts.ts`
-- 已完成长对话上下文压缩：`src/lib/chat/conversation-compressor.ts`
+- 历史长对话上下文压缩已随 LKA-001 Phase 5 范围收缩删除
 - 已完成分类/重排阈值常量化：`src/config/constants.ts`
 - 已完成去重扫描从固定最近 200 条扩展为分页全量内容扫描
 - 已完成 nightly 降级保护：模型降级时跳过矛盾精判、wikilink 智能补充、路由优化和旗舰画像更新
@@ -975,7 +876,7 @@ Phase 8 — 验证和作品集交付
 - 新增回归测试：`memory-api-client.test.ts`、`chat-ui-restoration.test.tsx`
 - 已收紧本地安全边界：默认 `dev`/`start` 绑定 `127.0.0.1`，middleware 拒绝非本机 Host；本机跨 Origin 工具调用保持可用
 - 已恢复检索库语义：`/memory` 提供列表/搜索/话题筛选/分页，`/memory/map` 使用唯一的 `KnowledgeMap` 实现
-- 已补齐用户入口：首页快捷入口“开始对话”指向 `/chat`，设置侧栏新增“工具监听”指向 `/settings/tools`
+- Phase 5 已将首页快捷入口替换为来源设置、审核队列、检索库和知识图谱
 - 已统一 `/api/listen` 错误契约，并让 `public/bridge/capture.js` 读取对象错误中的 `message`
 - 已加入 Vitest 临时 memory root、覆盖率阈值和 Playwright 隔离 seed；真实浏览器覆盖 5 条关键流程
 - 已完成写入质量闸门三态化：`QualityFilterService` 输出 `{verdict: accept|reject|review, score, reason}`，LLM 0-10 分级评分（≥7 入库 / 4-6 人工 / <4 拒绝），降级/解析失败重试后/API 异常统一转 `review`（fail-closed）；prompt 注入库内相似记忆（top-K，≥0.6）供新颖性比对

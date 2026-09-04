@@ -6,11 +6,6 @@ const knowledgeModelMock = vi.hoisted(() => ({
   isDegradedMode: false,
 }));
 
-// Legacy route optimizer and retained knowledge jobs share the same controllable fake.
-vi.mock("../lib/ai/model-adapter", () => ({
-  ModelAdapter: knowledgeModelMock,
-  ModelType: { flagship: "flagship", standard: "standard", budget: "budget" },
-}));
 vi.mock("../lib/ai/knowledge-model-adapter", () => ({
   KnowledgeModelAdapter: knowledgeModelMock,
 }));
@@ -25,43 +20,12 @@ vi.mock("../lib/graph/wiki-graph", () => ({
   })),
 }));
 
-// Mock TaskRouter
-vi.mock("../lib/ai/task-router", () => {
-  const routing: Record<string, string> = {
-    intent_classification: "flagship",
-    audit_evaluation: "flagship",
-    quality_evaluation: "flagship",
-    final_evaluation: "flagship",
-    chat_response: "standard",
-    code_generation: "standard",
-    profile_analysis: "standard",
-    memory_extraction: "standard",
-    memory_classification: "standard",
-    translation: "budget",
-    test_generation: "budget",
-    summarization: "budget",
-    simple_extraction: "budget",
-    format_conversion: "budget",
-  };
-  return {
-    TaskRouter: {
-      getRoutingTable: vi.fn(() => ({ ...routing })),
-      override: vi.fn((cat: string, model: string) => {
-        routing[cat] = model;
-      }),
-      route: vi.fn((task: string) => routing[task] || "standard"),
-    },
-  };
-});
-
-import { ModelAdapter } from "../lib/ai/model-adapter";
-import { TaskRouter } from "../lib/ai/task-router";
+import { KnowledgeModelAdapter as ModelAdapter } from "../lib/ai/knowledge-model-adapter";
 
 import { NightlyOrchestrator } from "../server/orchestrators/nightly-orchestrator";
 import { NightlyScheduler } from "../server/schedulers/nightly-scheduler";
 import { ContradictionDetector } from "../server/orchestrators/contradiction-detector";
 import { LinkSupplementer } from "../server/orchestrators/link-supplementer";
-import { RouteOptimizer } from "../server/orchestrators/route-optimizer";
 import { DailyReporter } from "../server/orchestrators/daily-reporter";
 import { MemoryRecord } from "../types/memory";
 
@@ -352,123 +316,6 @@ describe("LinkSupplementer", () => {
     (ModelAdapter as any).isDegradedMode = false;
     const s = new LinkSupplementer();
     s.close();
-  });
-});
-
-// ────────────────────────────────────────────────────────────
-// RouteOptimizer
-// ────────────────────────────────────────────────────────────
-describe("RouteOptimizer", () => {
-  beforeEach(() => {
-    TaskRouter.getRoutingTable(); // ensure routing is reset
-  });
-
-  it("should return empty for no memories", async () => {
-    const optimizer = new RouteOptimizer();
-    const result = await optimizer.optimize([], []);
-    expect(result.suggestions).toEqual([]);
-    expect(result.appliedCount).toBe(0);
-    optimizer.close();
-  });
-
-  it("should apply AI-suggested routing changes", async () => {
-    (ModelAdapter.generate as any).mockResolvedValue({
-      content: JSON.stringify([
-        {
-          taskCategory: "summarization",
-          currentModel: "budget",
-          suggestedModel: "standard",
-          reason: "今日摘要质量要求高",
-        },
-        {
-          taskCategory: "translation",
-          currentModel: "budget",
-          suggestedModel: "standard",
-          reason: "翻译任务增多",
-        },
-      ]),
-    });
-
-    const optimizer = new RouteOptimizer();
-    const mem = makeMemory("1", "Test", "coding", "Writing code", ["code"]);
-    const result = await optimizer.optimize([mem], [mem]);
-
-    expect(result.suggestions.length).toBe(2);
-    expect(result.appliedCount).toBe(2);
-    expect(result.suggestions[0].taskCategory).toBe("summarization");
-    expect(result.suggestions[0].suggestedModel).toBe("standard");
-    optimizer.close();
-  });
-
-  it("should ignore invalid task categories", async () => {
-    (ModelAdapter.generate as any).mockResolvedValue({
-      content: JSON.stringify([
-        {
-          taskCategory: "invalid_task",
-          currentModel: "budget",
-          suggestedModel: "flagship",
-          reason: "测试",
-        },
-      ]),
-    });
-
-    const optimizer = new RouteOptimizer();
-    const mem = makeMemory("1", "Test", "coding", "Writing code", ["code"]);
-    const result = await optimizer.optimize([mem], [mem]);
-
-    expect(result.suggestions).toEqual([]);
-    optimizer.close();
-  });
-
-  it("should ignore invalid model types", async () => {
-    (ModelAdapter.generate as any).mockResolvedValue({
-      content: JSON.stringify([
-        {
-          taskCategory: "summarization",
-          currentModel: "budget",
-          suggestedModel: "super_model",
-          reason: "测试",
-        },
-      ]),
-    });
-
-    const optimizer = new RouteOptimizer();
-    const mem = makeMemory("1", "Test", "coding", "Writing code", ["code"]);
-    const result = await optimizer.optimize([mem], [mem]);
-
-    expect(result.suggestions).toEqual([]);
-    optimizer.close();
-  });
-
-  it("should handle AI failure gracefully", async () => {
-    (ModelAdapter.generate as any).mockRejectedValue(new Error("AI down"));
-
-    const optimizer = new RouteOptimizer();
-    const mem = makeMemory("1", "Test", "coding", "Writing code", ["code"]);
-    const result = await optimizer.optimize([mem], [mem]);
-
-    expect(result.suggestions).toEqual([]);
-    optimizer.close();
-  });
-
-  it("should skip LLM route optimization when model adapter is degraded", async () => {
-    (ModelAdapter as any).isDegradedMode = true;
-    (ModelAdapter.generate as any).mockRejectedValue(new Error("should not call LLM"));
-    (ModelAdapter.generate as any).mockClear();
-
-    const optimizer = new RouteOptimizer();
-    const mem = makeMemory("1", "Test", "coding", "Writing code", ["code"]);
-    const result = await optimizer.optimize([mem], [mem]);
-
-    expect(result).toEqual({ suggestions: [], appliedCount: 0 });
-    expect(ModelAdapter.generate).not.toHaveBeenCalled();
-    optimizer.close();
-  });
-
-  afterEach(() => {
-    (ModelAdapter as any).isDegradedMode = false;
-    const o = new RouteOptimizer();
-    o.close();
   });
 });
 

@@ -30,7 +30,6 @@ export default defineConfig({
       MEMORY_ROOT: e2eMemoryRoot,
       VECTOR_BACKEND: "js",
       NIGHTLY_ENABLED: "false",
-      BROWSER_COLLECT_ENABLED: "false",
       NEXT_TELEMETRY_DISABLED: "1",
     },
   },

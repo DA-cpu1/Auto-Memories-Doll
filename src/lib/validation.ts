@@ -1,29 +1,5 @@
 import { z } from "zod";
 
-export const chatSessionIdSchema = z.string().regex(/^[a-zA-Z0-9_-]+$/, "sessionId 格式无效");
-
-export const chatMessageSchema = z.object({
-  role: z.enum(["user", "assistant", "system"]),
-  content: z.string(),
-  id: z.string().optional(),
-  timestamp: z.string().optional(),
-});
-
-export const chatSessionWriteSchema = z.object({
-  mode: z.enum(["chat", "memory", "prompt"]).default("chat"),
-  messages: z.array(chatMessageSchema),
-});
-
-export const chatSessionImportSchema = z.object({
-  sessions: z
-    .array(
-      chatSessionWriteSchema.extend({
-        sessionId: chatSessionIdSchema,
-      }),
-    )
-    .max(100, "单次最多迁移 100 个会话"),
-});
-
 const modelTierSchema = z.object({
   model: z.string().min(1, "model 不能为空"),
   maxTokens: z.number().int().min(1).max(131072),
@@ -54,13 +30,6 @@ export const aiConfigSchema = z.object({
   embedding: embeddingSchema,
 });
 
-export const chatRequestSchema = z.object({
-  messages: z.array(chatMessageSchema).min(1, "messages 至少需要一条消息"),
-  mode: z.enum(["chat", "memory", "prompt"]).default("chat"),
-  sessionId: chatSessionIdSchema.default("default"),
-  memoryIds: z.array(z.string()).optional(),
-});
-
 export const memoryCreateSchema = z.object({
   title: z.string().min(1, "标题不能为空"),
   content: z.string().min(1, "内容不能为空"),
@@ -80,38 +49,6 @@ export const memoryUpdateSchema = z.object({
 export const ingestRequestSchema = z.object({
   content: z.string().min(1, "内容不能为空"),
   format: z.enum(["text", "markdown", "json"]).default("text"),
-});
-
-export const promptCreateSchema = z.object({
-  id: z.string().min(1, "id 不能为空"),
-  name: z.string().min(1, "名称不能为空"),
-  content: z.string().min(1, "内容不能为空"),
-  variables: z.array(z.string()).default([]),
-  description: z.string().optional(),
-});
-
-export const promptUpdateSchema = z.object({
-  name: z.string().optional(),
-  content: z.string().optional(),
-  variables: z.array(z.string()).optional(),
-  description: z.string().optional(),
-});
-
-export const mcpServerSchema = z.object({
-  name: z.string().min(1, "名称不能为空"),
-  enabled: z.boolean().default(true),
-  command: z.string().min(1, "命令不能为空"),
-  args: z.array(z.string()).default([]),
-  env: z.record(z.string(), z.string()).default({}),
-  description: z.string().optional(),
-});
-
-export const skillSchema = z.object({
-  name: z.string().min(1, "名称不能为空"),
-  enabled: z.boolean().default(true),
-  trigger: z.string().min(1, "触发关键词不能为空"),
-  description: z.string().optional(),
-  prompt: z.string().min(1, "提示词不能为空"),
 });
 
 const notesPathSchema = z

@@ -82,10 +82,6 @@ export const getIndexMapPath = (): string => {
   return join(getMemoryRoot(), "index-map.md");
 };
 
-export const getProfilePath = (): string => {
-  return join(getMemoryRoot(), "profile.md");
-};
-
 export const getNotesPath = (): string => {
   return join(getMemoryRoot(), "notes");
 };

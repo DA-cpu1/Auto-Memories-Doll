@@ -13,6 +13,7 @@ interface NavTab {
 const navTabs: NavTab[] = [
   { id: "home", label: "首页", href: "/" },
   { id: "library", label: "检索库", href: "/memory" },
+  { id: "review", label: "审核", href: "/audit" },
   { id: "settings", label: "设置", href: "/settings/ai" },
 ];
 

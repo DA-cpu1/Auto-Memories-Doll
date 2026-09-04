@@ -15,49 +15,35 @@ function collectBrowserDiagnostics(page: Page) {
 
 test.describe.configure({ mode: "serial" });
 
-test("首页可以进入聊天并启用发送按钮", async ({ page }) => {
+test("首页展示处理状态并可进入来源设置", async ({ page }) => {
   const diagnostics = collectBrowserDiagnostics(page);
 
   await page.goto("/");
-  await page.locator('a[href="/chat"]').filter({ hasText: "开始对话" }).click();
+  await expect(page.getByRole("heading", { name: "知识处理概览" })).toBeVisible();
+  await expect(page.getByText("已登记来源")).toBeVisible();
+  await page.getByRole("link", { name: /来源设置/ }).click();
 
-  await expect(page).toHaveURL(/\/chat$/);
-  await expect(page).toHaveTitle(/开始对话/);
-  await expect(page.getByText("与你的 AI 伙伴对话")).toBeVisible();
-
-  const input = page.getByPlaceholder("输入你的消息...");
-  const sendButton = page.getByRole("button", { name: "发送" });
-  await input.fill("测试消息");
-  await expect(sendButton).toBeEnabled();
+  await expect(page).toHaveURL(/\/settings\/tools$/);
+  await expect(page.getByRole("heading", { name: "工具监听" })).toBeVisible();
   expect(diagnostics).toEqual([]);
 });
 
-test("手机端聊天保持单列布局并可展开记忆选择器", async ({ page }) => {
+test("手机端处理概览无横向溢出且可以检索", async ({ page }) => {
   const diagnostics = collectBrowserDiagnostics(page);
   await page.setViewportSize({ width: 390, height: 844 });
 
-  await page.goto("/chat");
-  await expect(page.getByRole("heading", { name: "对话" })).toBeVisible();
+  await page.goto("/");
+  await expect(page.getByRole("heading", { name: "知识处理概览" })).toBeVisible();
 
   const pageMetrics = await page.evaluate(() => ({
     viewportWidth: document.documentElement.clientWidth,
     pageWidth: document.documentElement.scrollWidth,
-    viewportHeight: window.innerHeight,
-    pageHeight: document.documentElement.scrollHeight,
   }));
   expect(pageMetrics.pageWidth).toBeLessThanOrEqual(pageMetrics.viewportWidth);
-  expect(pageMetrics.pageHeight).toBeLessThanOrEqual(pageMetrics.viewportHeight + 8);
 
-  await page.getByRole("button", { name: "记忆", exact: true }).click();
-  const memoryPicker = page.locator("#mobile-memory-picker");
-  await expect(memoryPicker).toBeHidden();
-  await page.getByRole("button", { name: "选择记忆" }).click();
-  await expect(memoryPicker).toBeVisible();
-  await expect(page.getByRole("button", { name: "收起记忆" })).toBeVisible();
-  await expect(page.getByPlaceholder("分享值得记住的内容...")).toBeVisible();
-
-  const expandedWidth = await page.evaluate(() => document.documentElement.scrollWidth);
-  expect(expandedWidth).toBeLessThanOrEqual(pageMetrics.viewportWidth);
+  await page.getByPlaceholder("输入关键词或自然语言问题").fill("E2E 测试记忆");
+  await page.getByRole("button", { name: "检索", exact: true }).click();
+  await expect(page.getByText("E2E 测试记忆").first()).toBeVisible();
   expect(diagnostics).toEqual([]);
 });
 
@@ -96,7 +82,7 @@ test("设置侧栏可以进入工具监听并显示选中态", async ({ page }) 
 
   await page.goto("/");
   await page.getByRole("link", { name: "设置", exact: true }).click();
-  await page.getByRole("link", { name: "工具监听", exact: true }).click();
+  await page.getByRole("link", { name: "来源监听", exact: true }).click();
 
   await expect(page).toHaveURL(/\/settings\/tools$/);
   await expect(page.getByRole("heading", { name: "工具监听" })).toBeVisible();

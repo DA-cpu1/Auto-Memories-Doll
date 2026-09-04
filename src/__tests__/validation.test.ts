@@ -1,6 +1,5 @@
 import { describe, it, expect } from "vitest";
 import {
-  chatRequestSchema,
   memoryCreateSchema,
   memoryUpdateSchema,
   storageConfigPreviewSchema,
@@ -8,44 +7,6 @@ import {
   toolSourceCreateSchema,
   toolSourceUpdateSchema,
 } from "../lib/validation";
-
-describe("chatRequestSchema", () => {
-  const validBody = {
-    messages: [{ role: "user" as const, content: "hello" }],
-    mode: "chat" as const,
-    sessionId: "test-session",
-  };
-
-  it("passes valid request", () => {
-    expect(chatRequestSchema.safeParse(validBody).success).toBe(true);
-  });
-
-  it("defaults mode to chat", () => {
-    const result = chatRequestSchema.safeParse({ messages: validBody.messages });
-    expect(result.success).toBe(true);
-    if (result.success) expect(result.data.mode).toBe("chat");
-  });
-
-  it("rejects empty messages array", () => {
-    const result = chatRequestSchema.safeParse({ messages: [] });
-    expect(result.success).toBe(false);
-  });
-
-  it("rejects invalid role", () => {
-    const result = chatRequestSchema.safeParse({
-      messages: [{ role: "bot", content: "hi" }],
-    });
-    expect(result.success).toBe(false);
-  });
-
-  it("rejects a session id that could escape the sessions directory", () => {
-    const result = chatRequestSchema.safeParse({
-      messages: validBody.messages,
-      sessionId: "../outside",
-    });
-    expect(result.success).toBe(false);
-  });
-});
 
 describe("memoryCreateSchema", () => {
   it("passes with required fields", () => {

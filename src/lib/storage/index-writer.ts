@@ -1,5 +1,5 @@
-import { writeFile, readFile } from "./file-manager";
-import { getIndexMapPath, getProfilePath } from "./path-resolver";
+import { writeFile } from "./file-manager";
+import { getIndexMapPath } from "./path-resolver";
 import { MemoryRecord } from "../../types/memory";
 
 export const updateIndexMap = async (memories: MemoryRecord[]): Promise<void> => {
@@ -30,25 +30,4 @@ export const updateIndexMap = async (memories: MemoryRecord[]): Promise<void> =>
   });
 
   await writeFile(getIndexMapPath(), content);
-};
-
-export const updateProfile = async (tags: string[]): Promise<void> => {
-  let content = "# 个性标签\n\n";
-  content += "## 偏好标签\n";
-  tags.forEach((tag) => {
-    content += `- ${tag}\n`;
-  });
-  await writeFile(getProfilePath(), content);
-};
-
-export const readProfileTags = async (): Promise<string[]> => {
-  const content = await readFile(getProfilePath());
-  const lines = content.split("\n");
-  const tags: string[] = [];
-  lines.forEach((line) => {
-    if (line.startsWith("- ")) {
-      tags.push(line.substring(2).trim());
-    }
-  });
-  return tags;
 };

@@ -5,7 +5,7 @@
 | 字段     | 内容                                                            |
 | -------- | --------------------------------------------------------------- |
 | 规范编号 | `LKA-001`                                                       |
-| 状态     | 已确认，Phase 2、Phase 4 完成                                   |
+| 状态     | 已确认，Phase 2、Phase 4、Phase 5 完成                          |
 | 创建日期 | 2026-09-03                                                      |
 | 目标产品 | 本地知识整理 Agent                                              |
 | Git 基线 | `main`，改造前暂存为 `pre-sdd-knowledge-agent-scope-2026-09-03` |
@@ -26,6 +26,7 @@
 6. [phase-1-characterization.md](./phase-1-characterization.md)：保留链路的真实持久化特征测试报告。
 7. [phase-2-knowledge-agent.md](./phase-2-knowledge-agent.md)：统一来源版本、状态机和显式 Agent 编排报告。
 8. [phase-4-decoupling.md](./phase-4-decoupling.md)：保留代码与聊天、画像、Prompt、MCP/Skills 的解耦报告。
+9. [phase-5-scope-removal.md](./phase-5-scope-removal.md)：范围外页面、API、运行时与依赖删除报告。
 
 ## 一句话定位
 
@@ -54,6 +55,7 @@
 - 基于画像标签的个性化排序。
 - 面向聊天人格的 Prompt 管理页面。
 - 面向聊天的 MCP 和 Skills 工具调用。
+- 浏览器历史和书签采集。
 - 只服务于聊天模型路由或画像维护的后台任务。
 
 ### 不得误删

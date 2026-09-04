@@ -1,9 +1,9 @@
 export type AiProvider = string;
 
-/** 模型分层槽位标识（chat 模型 + embedding 模型） */
+/** 模型分层槽位标识（文本生成模型 + embedding 模型） */
 export type ModelSlot = "flagship" | "standard" | "budget" | "embedding";
 
-/** 单层 chat 模型配置（Provider/API Key 共享，仅模型名和参数独立） */
+/** 单层文本生成模型配置（Provider/API Key 共享，仅模型名和参数独立） */
 export type ModelTierConfig = {
   model: string;
   maxTokens: number;
@@ -20,7 +20,7 @@ export type EmbeddingConfig = {
   maxConcurrency: number;
   /** 排队超时 (ms) */
   queueTimeoutMs: number;
-  /** Embedding 专属 API Key（可选，留空回落共享 apiKey，用于 chat 与 embedding 使用不同提供商） */
+  /** Embedding 专属 API Key（可选，留空回落共享 apiKey） */
   apiKey?: string;
   /** Embedding 专属 Base URL（可选，留空回落共享 baseURL） */
   baseURL?: string;
@@ -36,41 +36,12 @@ export type AiConfig = {
   apiKey: string;
   /** 旗舰模型 — 分流、评估、审计 */
   flagship: ModelTierConfig;
-  /** 普通模型 — 对话、代码生成 */
+  /** 普通模型 — 知识整理与结构化生成 */
   standard: ModelTierConfig;
   /** 廉价模型 — 测试生成、摘要、简单提取 */
   budget: ModelTierConfig;
   /** Embedding 模型 — 向量生成与检索 */
   embedding: EmbeddingConfig;
-};
-
-export type McpServerConfig = {
-  id: string;
-  name: string;
-  enabled: boolean;
-  command: string;
-  args: string[];
-  env: Record<string, string>;
-  description?: string;
-  createdAt: string;
-  updatedAt: string;
-};
-
-export type SkillConfig = {
-  id: string;
-  name: string;
-  enabled: boolean;
-  trigger: string;
-  description?: string;
-  prompt: string;
-  /** 标记为 true 时，McpIngestBridge 会自动执行该 skill 并将输出送入 ingest 管线 */
-  autoIngest?: boolean;
-  /** autoIngest 模式下使用的标签 */
-  tags?: string[];
-  /** autoIngest 模式下归入的话题目录 */
-  topic?: string;
-  createdAt: string;
-  updatedAt: string;
 };
 
 export type StorageConfig = {
@@ -120,9 +91,3 @@ export type AppConfig = {
 export type ConfigSection = "ai" | "storage" | "tool-sources";
 
 /** Temporary compatibility surface for features scheduled for removal in LKA-001 Phase 5. */
-export type LegacyIntegrationConfig = {
-  mcpServers: McpServerConfig[];
-  skills: SkillConfig[];
-};
-
-export type LegacyConfigSection = "mcp" | "skills";

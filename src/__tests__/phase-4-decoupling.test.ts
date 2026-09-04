@@ -12,7 +12,6 @@ vi.mock("../lib/storage/database", () => ({
 }));
 
 import { KnowledgeConfigService } from "../server/services/knowledge-config-service";
-import { ConfigService } from "../server/services/config-service";
 
 function source(relativePath: string): string {
   return readFileSync(join(process.cwd(), relativePath), "utf-8");
@@ -92,20 +91,18 @@ describe("KnowledgeConfigService non-destructive migration", () => {
   });
 
   it("leaves existing legacy rows untouched", () => {
-    const legacy = new ConfigService();
-    const created = legacy.createMcpServer({
-      name: "preserved server",
-      enabled: true,
-      command: "example",
-      args: [],
-      env: {},
-    });
-    legacy.close();
+    databaseState.current!.exec(`
+      CREATE TABLE mcp_servers (
+        id TEXT PRIMARY KEY,
+        name TEXT NOT NULL
+      );
+      INSERT INTO mcp_servers (id, name) VALUES ('legacy-server', 'preserved server');
+    `);
 
     new KnowledgeConfigService().close();
     const row = databaseState
       .current!.prepare("SELECT name FROM mcp_servers WHERE id = ?")
-      .get(created.id) as { name: string } | undefined;
+      .get("legacy-server") as { name: string } | undefined;
 
     expect(row?.name).toBe("preserved server");
   });

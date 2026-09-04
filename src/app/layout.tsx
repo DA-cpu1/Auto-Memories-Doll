@@ -6,7 +6,7 @@ import DegradationBanner from "../components/common/DegradationBanner";
 
 export const metadata: Metadata = {
   title: "Auto-Memories-Doll",
-  description: "A memory management system for AI conversations.",
+  description: "A local agent for organizing, reviewing, and retrieving knowledge.",
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {

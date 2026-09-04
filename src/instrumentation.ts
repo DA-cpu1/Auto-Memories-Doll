@@ -4,7 +4,6 @@ let auditScheduler: { start: () => void; stop: () => void } | null = null;
 let cleanupScheduler: { start: () => void; stop: () => void } | null = null;
 let vectorScheduler: { start: () => void; stop: () => void } | null = null;
 let retentionScheduler: { start: () => void; stop: () => void } | null = null;
-let browserCollectScheduler: { start: () => void; stop: () => void } | null = null;
 
 export async function register() {
   if (process.env.NEXT_RUNTIME === "nodejs") {
@@ -17,24 +16,18 @@ export async function register() {
     const { CleanupScheduler } = await import("./server/schedulers/cleanup-scheduler");
     const { VectorScheduler } = await import("./server/schedulers/vector-scheduler");
     const { RetentionScheduler } = await import("./server/schedulers/retention-scheduler");
-    const { BrowserCollectScheduler } =
-      await import("./server/schedulers/browser-collect-scheduler");
 
     auditScheduler = new AuditScheduler();
     cleanupScheduler = new CleanupScheduler();
     vectorScheduler = new VectorScheduler();
     retentionScheduler = new RetentionScheduler();
-    browserCollectScheduler = new BrowserCollectScheduler();
 
     auditScheduler.start();
     cleanupScheduler.start();
     vectorScheduler.start();
     retentionScheduler.start();
-    browserCollectScheduler.start();
 
-    logger.ingest.info(
-      "[Instrumentation] 调度器已启动: audit / cleanup / vector / retention / browser-collect",
-    );
+    logger.ingest.info("[Instrumentation] 调度器已启动: audit / cleanup / vector / retention");
 
     // 启动 AI API 健康检查（降级恢复）
     const { KnowledgeModelAdapter } = await import("./lib/ai/knowledge-model-adapter");
@@ -57,7 +50,6 @@ export async function register() {
       cleanupScheduler?.stop();
       vectorScheduler?.stop();
       retentionScheduler?.stop();
-      browserCollectScheduler?.stop();
       stopToolDirWatcher();
       KnowledgeModelAdapter.stopHealthCheck();
       process.exit(0);
