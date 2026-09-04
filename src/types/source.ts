@@ -27,3 +27,23 @@ export type SourceDocument = {
   createdAt: string;
   updatedAt: string;
 };
+
+export type SourceVersion = {
+  sourceId: string;
+  revision: string;
+  eventId: string;
+  operation: SourceRevisionOperation;
+  observedAt: string;
+  processedAt: string;
+  normalizationReport: import("./normalization").NormalizationReport;
+};
+
+export type SourceMemoryLink = {
+  sourceId: string;
+  revision: string;
+  memoryId: string;
+  sourceEventId?: string;
+  chunkHash?: string;
+  locator?: string;
+  createdAt: string;
+};

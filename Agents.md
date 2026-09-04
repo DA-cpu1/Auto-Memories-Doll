@@ -736,6 +736,7 @@ export type ConflictRecord = {
 | review 无人工裁决出口 | 无 | 已修复：`Orchestrator.resolveReviewEvent(eventId, action)`（accept 跳闸门直接落盘，避免重新入队死循环；reject 终拒归档）+ `GET/POST /api/audit/review-events` 路由 + API 契约登记 | ~~P2~~ |
 | 产品范围与 LKA-001 目标不一致 | `docs/specs/001-local-knowledge-agent/` 将产品收缩为本地知识整理 Agent，并明确删除聊天、画像、人格 Prompt 和聊天型 MCP/Skills | 已修复：Phase 5 删除范围外页面、API、运行时、scheduler 和依赖；首页改为来源状态、审核和检索入口，旧用户数据保持原位 | ~~P0~~ |
 | Phase 5 与主题资料 API 契约顺序 | T5.8 要求增加主题学习资料契约，但 T6.1 才定义主题资料 schema，且当前没有对应路由 | 已澄清：Phase 5 只登记真实存在的来源状态路由并删除旧契约；主题资料 schema 与真实路由在 T6.1 同步登记，禁止预置 stale contract | ~~P1~~ |
+| 来源版本、块身份与正式知识关系缺失 | LKA-001 FR-004、FR-006、FR-014、FR-015 要求可追溯和增量处理 | 已修复：新增 `source_versions`、`source_chunks`、`source_memory_links`；语义块哈希支持仅噪声变化无操作，发布/人工接受后建立来源关系，旧证据尽可能迁移 | ~~P0~~ |
 
 ### 11.2 渐进式路线图
 
@@ -807,7 +808,7 @@ Phase 5 — 检索与质量收口 [DONE]
 
 ### 11.3 LKA-001 功能收缩路线图
 
-详细规范位于 `docs/specs/001-local-knowledge-agent/`。Phase 5 已完成；当前可继续 Phase 3 去噪和来源追踪，并在其来源契约稳定后进入 Phase 6。
+详细规范位于 `docs/specs/001-local-knowledge-agent/`。Phase 3 至 Phase 5 已完成；当前进入 Phase 6 主题学习资料生成。
 
 ```text
 Phase 0 — 确认范围和建立基线 [DONE]
@@ -829,7 +830,12 @@ Phase 2 — 显式 KnowledgeAgent 契约 [DONE]
   [x] Agent 与 pending_events 集中状态迁移保护及中断恢复
   [x] 生产入口统一经 KnowledgeAgent，Orchestrator 降为内部兼容执行器
   [x] processing_attempts 类型化进度、结构化日志和状态查询
-Phase 3 — 去噪和来源追踪 [NEXT]
+Phase 3 — 去噪和来源追踪 [DONE]
+  [x] 去噪报告契约和确定性噪声分类统计
+  [x] LLM/Embedding 远程请求前统一密钥脱敏
+  [x] Markdown 章节、会话轮次优先的语义分块
+  [x] 来源版本与块哈希持久化，仅噪声变化无操作
+  [x] 发布知识与来源版本关系、Markdown 来源元数据及旧证据迁移
 Phase 4 — 保留代码解耦 [DONE]
   [x] 排序与 heatScore 删除画像亲和度
   [x] path resolver / 存储迁移删除 PromptCache 依赖
@@ -851,6 +857,7 @@ Phase 8 — 验证和作品集交付
 - LKA-001 Phase 0 已完成：规范确认、Git 基线、代码规模报告、移动端 hydration 竞争修复、图谱 E2E 更新和全门禁验证；详细结果见 `docs/specs/001-local-knowledge-agent/phase-0-baseline.md`
 - LKA-001 Phase 1 已完成：新增 13 条真实存储特征测试，并修复抽取卡覆盖原始 `sourceHash` 导致未变化文件重复入队的问题；详细结果见 `docs/specs/001-local-knowledge-agent/phase-1-characterization.md`
 - LKA-001 Phase 2 已完成：新增统一来源版本、`SourceRegistry`、集中状态机、显式 `KnowledgeAgent` 与持久化进度，生产入口不再直接实例化 `Orchestrator`；详细结果见 `docs/specs/001-local-knowledge-agent/phase-2-knowledge-agent.md`
+- LKA-001 Phase 3 已完成：新增可审计去噪、模型调用前密钥脱敏、语义分块、块级身份、来源版本与正式知识关系；详细结果见 `docs/specs/001-local-knowledge-agent/phase-3-noise-and-provenance.md`
 - LKA-001 Phase 4 已完成：排序、路径、AI 契约、nightly 和配置持久化均已与待删除功能解耦；详细结果见 `docs/specs/001-local-knowledge-agent/phase-4-decoupling.md`
 - LKA-001 Phase 5 已完成：删除范围外聊天、会话、画像、Prompt、MCP/Skills 和浏览器采集运行时，首页改为知识处理概览；详细结果见 `docs/specs/001-local-knowledge-agent/phase-5-scope-removal.md`
 

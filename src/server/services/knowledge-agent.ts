@@ -14,6 +14,8 @@ import { parseSourceRevisionEvent } from "../../lib/source/source-revision";
 import { parseSession, ParsedSession } from "../../lib/tools/session-parser";
 import { logger } from "../../lib/logger";
 import { KnowledgeModelAdapter } from "../../lib/ai/knowledge-model-adapter";
+import { normalizeTextWithReport } from "../../lib/utils/normalization";
+import { splitSemanticText } from "../pipelines/splitter";
 import type { AgentProgressEvent, AgentProgressOutcome, AgentStage } from "../../types/agent";
 import type { ToolWatchSource } from "../../types/config";
 import type {
@@ -24,6 +26,7 @@ import type {
   PendingEvent,
 } from "../../types/memory";
 import type { SourceDocument, SourceRevisionEvent } from "../../types/source";
+import type { NormalizationReport, SourceChunk } from "../../types/normalization";
 import { MemoryService } from "./memory-service";
 import { Orchestrator } from "./orchestrator";
 import { SourceRegistry } from "./source-registry";
@@ -43,6 +46,7 @@ export type SourceRevisionIngestResult = {
   memoryIds: string[];
   topic?: string;
   knowledgeCard?: KnowledgeCard & { content: string };
+  normalizationReport?: NormalizationReport;
 };
 
 type ParsedSource =
@@ -59,10 +63,14 @@ type ParsedSource =
 
 type NormalizedSource = {
   records: MemoryRecord[];
+  chunks: SourceChunk[];
+  normalizationReport: NormalizationReport;
   deleteMemoryIds?: string[];
   topic?: string;
   knowledgeCard?: KnowledgeCard & { content: string };
 };
+
+type NormalizedRecords = Omit<NormalizedSource, "chunks" | "normalizationReport">;
 
 type ProgressRow = {
   progressId: string;
@@ -126,6 +134,24 @@ export class KnowledgeAgent {
       stage = this.transition(event, stage, "normalizing", startedAt);
       const normalized = this.normalizeInput(event, parsed);
       const records = normalized.records;
+      const version = this.sourceRegistry.recordVersion(
+        event,
+        normalized.normalizationReport,
+        normalized.chunks,
+      );
+
+      if (version.normalizedUnchanged && event.operation !== "delete") {
+        this.sourceRegistry.markProcessed(event);
+        this.transition(event, stage, "done", startedAt, records[0]?.id, "skipped");
+        return {
+          status: "unchanged",
+          sourceEvent: event,
+          memoryIds: records.map((record) => record.id),
+          topic: normalized.topic,
+          knowledgeCard: normalized.knowledgeCard,
+          normalizationReport: normalized.normalizationReport,
+        };
+      }
 
       const cancelledMemoryIds = normalized.deleteMemoryIds
         ? this.memoryService.cancelUnpublishedSourceEvents(event.sourceId)
@@ -145,6 +171,7 @@ export class KnowledgeAgent {
           status: "staged",
           sourceEvent: event,
           memoryIds: normalized.deleteMemoryIds,
+          normalizationReport: normalized.normalizationReport,
         };
       }
 
@@ -155,6 +182,7 @@ export class KnowledgeAgent {
           status: "ignored",
           sourceEvent: event,
           memoryIds: cancelledMemoryIds,
+          normalizationReport: normalized.normalizationReport,
         };
       }
 
@@ -167,6 +195,7 @@ export class KnowledgeAgent {
           memoryIds: [],
           topic: normalized.topic,
           knowledgeCard: normalized.knowledgeCard,
+          normalizationReport: normalized.normalizationReport,
         };
       }
 
@@ -179,6 +208,7 @@ export class KnowledgeAgent {
         memoryIds,
         topic: normalized.topic,
         knowledgeCard: normalized.knowledgeCard,
+        normalizationReport: normalized.normalizationReport,
       };
     } catch (error) {
       this.sourceRegistry.markFailed(event, error instanceof Error ? error.message : String(error));
@@ -290,6 +320,7 @@ export class KnowledgeAgent {
             );
             break;
           }
+          this.linkPublishedMemory(sourceEvent, event.memoryId);
           let current: AgentStage = "processing";
           current = this.transition(sourceEvent, current, "accepted", startedAt, event.memoryId);
           current = this.transition(sourceEvent, current, "publishing", startedAt, event.memoryId);
@@ -403,6 +434,8 @@ export class KnowledgeAgent {
     const orchestrator = new Orchestrator();
     try {
       const resolved = await orchestrator.resolveReviewEvent(eventId, action);
+      if (action === "accept" && sourceEvent)
+        this.linkPublishedMemory(sourceEvent, resolved.memoryId);
       if (sourceEvent && this.latestProgress(sourceEvent.eventId)?.stage === "review") {
         this.recordReviewResolution(sourceEvent, resolved.memoryId, action);
       }
@@ -425,6 +458,7 @@ export class KnowledgeAgent {
     const orchestrator = new Orchestrator();
     try {
       const memory = await orchestrator.resolveConflict(conflictId, resolution, manualValue);
+      if (sourceEvent && resolution !== "keep") this.linkPublishedMemory(sourceEvent, memory.id);
       if (sourceEvent && this.latestProgress(sourceEvent.eventId)?.stage === "review") {
         this.recordReviewResolution(sourceEvent, memory.id, "accept");
       }
@@ -616,6 +650,11 @@ export class KnowledgeAgent {
   }
 
   private normalizeInput(event: SourceRevisionEvent, parsed: ParsedSource): NormalizedSource {
+    const emptyReport: NormalizationReport = {
+      inputCharacters: 0,
+      outputCharacters: 0,
+      removedNoise: [],
+    };
     if (parsed.kind === "delete") {
       const fallbackId = parsed.source
         ? stableToolMemoryId(parsed.source.id, parsed.locator ?? event.sourceId)
@@ -632,21 +671,56 @@ export class KnowledgeAgent {
       const memoryIds = [
         ...new Set([...historicalIds.map((row) => row.memoryId), fallbackId]),
       ].filter((memoryId) => Boolean(this.memoryService.getMemory(memoryId)));
-      return { records: [], deleteMemoryIds: memoryIds };
-    }
-    if (parsed.kind === "document") {
       return {
-        records: this.normalizeDocument(event, parsed.content, parsed.locator),
+        records: [],
+        chunks: [],
+        normalizationReport: emptyReport,
+        deleteMemoryIds: memoryIds,
       };
     }
-    if (parsed.kind === "tool") return this.normalizeToolSession(event, parsed);
-    return this.normalizeListenConversation(event, parsed.conversation);
+    if (parsed.kind === "document") {
+      const normalized = normalizeTextWithReport(parsed.content);
+      const chunks = splitSemanticText(normalized.content, { sourceId: event.sourceId });
+      return {
+        records: this.normalizeDocument(event, normalized.content, parsed.locator, chunks),
+        chunks,
+        normalizationReport: normalized.report,
+      };
+    }
+    if (parsed.kind === "tool") {
+      const normalized = normalizeTextWithReport(parsed.content);
+      const chunks = splitSemanticText(normalized.content, { sourceId: event.sourceId });
+      const result = this.normalizeToolSession(
+        event,
+        { ...parsed, content: normalized.content },
+        chunks,
+      );
+      return { ...result, chunks, normalizationReport: normalized.report };
+    }
+    const result = this.normalizeListenConversation(event, parsed.conversation);
+    const normalized = normalizeTextWithReport(result.records[0]?.content ?? "");
+    const chunks = splitSemanticText(normalized.content, { sourceId: event.sourceId });
+    const records = result.records.map((record) => ({
+      ...record,
+      content: normalized.content,
+      evidence: this.sourceEvidence(event, record.evidence, chunks),
+    }));
+    return {
+      ...result,
+      records,
+      chunks,
+      normalizationReport: normalized.report,
+      knowledgeCard: result.knowledgeCard
+        ? { ...result.knowledgeCard, content: normalized.content }
+        : undefined,
+    };
   }
 
   private normalizeDocument(
     event: SourceRevisionEvent,
     content: string,
     sourceLocator?: string,
+    chunks: SourceChunk[] = [],
   ): MemoryRecord[] {
     const locator = sourceLocator ?? event.sourcePath;
     if (content.length < 10) return [];
@@ -658,11 +732,15 @@ export class KnowledgeAgent {
             ...record,
             id: record.id || stableFileMemoryId(locator ?? event.sourceId),
             source: record.source || locator || event.sourceId,
-            evidence: {
-              text: record.evidence?.text ?? content.slice(0, 500),
-              location: record.evidence?.location ?? locator,
-              sourceHash: event.revision,
-            },
+            evidence: this.sourceEvidence(
+              event,
+              {
+                text: record.evidence?.text ?? content.slice(0, 500),
+                location: record.evidence?.location ?? locator,
+                sourceHash: event.revision,
+              },
+              chunks,
+            ),
           },
         ];
       }
@@ -677,20 +755,25 @@ export class KnowledgeAgent {
       id: stableFileMemoryId(locator ?? event.sourceId),
       source: locator ?? event.sourceId,
       sourceType: "ingest",
-      evidence: {
-        ...(record.evidence ?? {
-          text: content.slice(0, 500),
-          location: locator,
-        }),
-        sourceHash: event.revision,
-      },
+      evidence: this.sourceEvidence(
+        event,
+        {
+          ...(record.evidence ?? {
+            text: content.slice(0, 500),
+            location: locator,
+          }),
+          sourceHash: event.revision,
+        },
+        chunks,
+      ),
     }));
   }
 
   private normalizeToolSession(
     event: SourceRevisionEvent,
     parsed: Extract<ParsedSource, { kind: "tool" }>,
-  ): NormalizedSource {
+    chunks: SourceChunk[] = [],
+  ): NormalizedRecords {
     if (!parsed.content || parsed.session.messageCount === 0) return { records: [] };
     const topic = parsed.source.topic || defaultTopicForTool(parsed.source.toolType);
     const tags = [parsed.source.toolType, "tool-session"];
@@ -709,11 +792,15 @@ export class KnowledgeAgent {
       stableToolMemoryId(parsed.source.id, parsed.locator),
       undefined,
       {
-        evidence: {
-          text: parsed.content.slice(0, 500),
-          location: parsed.locator,
-          sourceHash: event.revision,
-        },
+        evidence: this.sourceEvidence(
+          event,
+          {
+            text: parsed.content.slice(0, 500),
+            location: parsed.locator,
+            sourceHash: event.revision,
+          },
+          chunks,
+        ),
       },
     );
     return { records: [record], topic };
@@ -722,7 +809,7 @@ export class KnowledgeAgent {
   private normalizeListenConversation(
     event: SourceRevisionEvent,
     conversation: ConversationData,
-  ): NormalizedSource {
+  ): NormalizedRecords {
     const processor = new ConversationProcessor();
     const { title, content, topic } = processor.formatConversation(conversation);
     const generated = processor.generateKnowledgeCard(conversation);
@@ -744,11 +831,11 @@ export class KnowledgeAgent {
         topicZh: generated.topicZh,
       },
       {
-        evidence: {
+        evidence: this.sourceEvidence(event, {
           text: memoryContent.slice(0, 500),
           location: conversation.metadata?.url,
           sourceHash: event.revision,
-        },
+        }),
       },
     );
     return { records: [record], topic, knowledgeCard };
@@ -768,6 +855,42 @@ export class KnowledgeAgent {
     if (existing.evidence?.sourceHash === event.revision) return existing.id;
     this.memoryService.stageUpdateMemory(record.id, fileUpdates(record), sourceRevision);
     return record.id;
+  }
+
+  private sourceEvidence(
+    event: SourceRevisionEvent,
+    evidence: MemoryEvidence | undefined,
+    chunks: SourceChunk[] = [],
+  ): MemoryEvidence {
+    return {
+      text: evidence?.text ?? chunks[0]?.content.slice(0, 500) ?? "",
+      location: evidence?.location ?? event.sourcePath,
+      sourceHash: evidence?.sourceHash ?? event.revision,
+      sourceId: event.sourceId,
+      sourceRevision: event.revision,
+      sourceEventId: event.eventId,
+      chunkHash: chunks.length === 1 ? chunks[0].hash : undefined,
+    };
+  }
+
+  private linkPublishedMemory(event: SourceRevisionEvent, memoryId: string): void {
+    const ids = (
+      this.db
+        .prepare("SELECT id FROM memories WHERE id = ? OR id GLOB ? ORDER BY id ASC")
+        .all(memoryId, `${memoryId}-p[0-9]*`) as Array<{ id: string }>
+    ).map((row) => row.id);
+    for (const id of ids) {
+      const memory = this.memoryService.getMemory(id);
+      if (!memory) continue;
+      this.sourceRegistry.linkMemory({
+        sourceId: event.sourceId,
+        revision: event.revision,
+        memoryId: id,
+        sourceEventId: event.eventId,
+        chunkHash: memory.evidence?.chunkHash,
+        locator: memory.evidence?.location ?? event.sourcePath,
+      });
+    }
   }
 
   private transition(

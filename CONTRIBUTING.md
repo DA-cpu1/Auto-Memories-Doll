@@ -40,7 +40,7 @@
 
 ## 当前优先事项
 
-查看 `AGENTS.md` 的 LKA-001 路线图；Phase 5 已完成，当前优先推进 Phase 3 来源追踪和 Phase 6 主题学习资料。
+查看 `AGENTS.md` 的 LKA-001 路线图；Phase 3 至 Phase 5 已完成，当前优先推进 Phase 6 主题学习资料。
 
 ## 开发环境
 

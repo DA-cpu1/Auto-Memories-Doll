@@ -807,6 +807,7 @@ export class Orchestrator {
         tags: card.tags.length > 0 ? card.tags : candidate.tags,
         tagsZh: card.tags.length > 0 ? card.tags : candidate.tagsZh,
         evidence: {
+          ...candidate.evidence,
           text: candidate.evidence?.text ?? candidate.content.slice(0, 500),
           location: candidate.evidence?.location,
           sourceHash: hash,

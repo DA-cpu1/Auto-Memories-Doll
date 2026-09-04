@@ -12,6 +12,11 @@ export type MemoryEvidence = {
    * 与原文不再字面可比，靠此哈希判断来源文件是否变更 / 是否重复入库
    */
   sourceHash?: string;
+  /** 统一来源契约，用于从已发布知识反查原始来源版本。 */
+  sourceId?: string;
+  sourceRevision?: string;
+  sourceEventId?: string;
+  chunkHash?: string;
 };
 
 export type MemoryRecord = {

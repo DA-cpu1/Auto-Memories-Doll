@@ -54,12 +54,17 @@ export function parseMemoryFromText(text: string): MemoryRecord | null {
     source: frontmatter.source || "",
     sourceType: (frontmatter.sourceType as MemoryRecord["sourceType"]) || "manual",
     kind: (frontmatter.kind as MemoryRecord["kind"]) || "fact",
-    evidence: frontmatter.evidenceText
-      ? {
-          text: frontmatter.evidenceText,
-          location: frontmatter.evidenceLocation || undefined,
-        }
-      : undefined,
+    evidence:
+      frontmatter.evidenceText || frontmatter.sourceId
+        ? {
+            text: frontmatter.evidenceText || "",
+            location: frontmatter.evidenceLocation || undefined,
+            sourceId: frontmatter.sourceId || undefined,
+            sourceRevision: frontmatter.sourceRevision || undefined,
+            sourceEventId: frontmatter.sourceEventId || undefined,
+            chunkHash: frontmatter.sourceChunkHash || undefined,
+          }
+        : undefined,
     title,
     titleZh,
     content: body,

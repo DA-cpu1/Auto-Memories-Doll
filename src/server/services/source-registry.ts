@@ -12,7 +12,10 @@ import type {
   SourceHealth,
   SourceRevisionEvent,
   SourceType,
+  SourceMemoryLink,
+  SourceVersion,
 } from "../../types/source";
+import type { NormalizationReport, SourceChunk } from "../../types/normalization";
 
 export type SourceRevisionDisposition = "new" | "changed" | "unchanged";
 
@@ -57,6 +60,43 @@ export class SourceRegistry {
         updatedAt TEXT NOT NULL
       )
     `);
+    this.db.exec(`
+      CREATE TABLE IF NOT EXISTS source_versions (
+        sourceId TEXT NOT NULL,
+        revision TEXT NOT NULL,
+        eventId TEXT NOT NULL,
+        operation TEXT NOT NULL,
+        observedAt TEXT NOT NULL,
+        processedAt TEXT NOT NULL,
+        normalizationReport TEXT NOT NULL DEFAULT '{}',
+        PRIMARY KEY (sourceId, revision)
+      );
+      CREATE TABLE IF NOT EXISTS source_chunks (
+        sourceId TEXT NOT NULL,
+        revision TEXT NOT NULL,
+        chunkId TEXT NOT NULL,
+        chunkHash TEXT NOT NULL,
+        ordinal INTEGER NOT NULL,
+        locator TEXT,
+        boundary TEXT NOT NULL,
+        PRIMARY KEY (sourceId, revision, chunkId)
+      );
+      CREATE INDEX IF NOT EXISTS idx_source_chunks_hash
+        ON source_chunks(sourceId, chunkHash);
+      CREATE TABLE IF NOT EXISTS source_memory_links (
+        sourceId TEXT NOT NULL,
+        revision TEXT NOT NULL,
+        memoryId TEXT NOT NULL,
+        sourceEventId TEXT,
+        chunkHash TEXT,
+        locator TEXT,
+        createdAt TEXT NOT NULL,
+        PRIMARY KEY (sourceId, revision, memoryId)
+      );
+      CREATE INDEX IF NOT EXISTS idx_source_memory_links_memory
+        ON source_memory_links(memoryId);
+    `);
+    this.migrateLegacyMemorySources();
   }
 
   beginObservation(value: SourceRevisionEvent): SourceObservation {
@@ -111,6 +151,192 @@ export class SourceRegistry {
       )
       .run(event.revision, now, now, event.sourceId);
     return this.requireSource(event.sourceId);
+  }
+
+  recordVersion(
+    event: SourceRevisionEvent,
+    report: NormalizationReport,
+    chunks: SourceChunk[],
+  ): { normalizedUnchanged: boolean } {
+    parseSourceRevisionEvent(event);
+    const previous = this.db
+      .prepare(
+        `SELECT revision FROM source_versions
+         WHERE sourceId = ? AND revision <> ?
+         ORDER BY processedAt DESC LIMIT 1`,
+      )
+      .get(event.sourceId, event.revision) as { revision: string } | undefined;
+    const previousHashes = previous ? this.getChunkHashes(event.sourceId, previous.revision) : [];
+    const currentHashes = chunks.map((chunk) => chunk.hash);
+    const normalizedUnchanged =
+      previousHashes.length > 0 &&
+      previousHashes.length === currentHashes.length &&
+      previousHashes.every((hash, index) => hash === currentHashes[index]);
+    const processedAt = new Date().toISOString();
+
+    this.db.transaction(() => {
+      this.db
+        .prepare(
+          `INSERT INTO source_versions (
+             sourceId, revision, eventId, operation, observedAt, processedAt, normalizationReport
+           ) VALUES (?, ?, ?, ?, ?, ?, ?)
+           ON CONFLICT(sourceId, revision) DO UPDATE SET
+             eventId = excluded.eventId,
+             operation = excluded.operation,
+             observedAt = excluded.observedAt,
+             processedAt = excluded.processedAt,
+             normalizationReport = excluded.normalizationReport`,
+        )
+        .run(
+          event.sourceId,
+          event.revision,
+          event.eventId,
+          event.operation,
+          event.observedAt,
+          processedAt,
+          JSON.stringify(report),
+        );
+      this.db
+        .prepare("DELETE FROM source_chunks WHERE sourceId = ? AND revision = ?")
+        .run(event.sourceId, event.revision);
+      const insertChunk = this.db.prepare(
+        `INSERT INTO source_chunks (
+           sourceId, revision, chunkId, chunkHash, ordinal, locator, boundary
+         ) VALUES (?, ?, ?, ?, ?, ?, ?)`,
+      );
+      for (const chunk of chunks) {
+        insertChunk.run(
+          event.sourceId,
+          event.revision,
+          chunk.chunkId,
+          chunk.hash,
+          chunk.ordinal,
+          chunk.locator ?? null,
+          chunk.boundary,
+        );
+      }
+    })();
+    return { normalizedUnchanged };
+  }
+
+  getVersion(sourceId: string, revision: string): SourceVersion | null {
+    const row = this.db
+      .prepare("SELECT * FROM source_versions WHERE sourceId = ? AND revision = ?")
+      .get(sourceId, revision) as
+      (Omit<SourceVersion, "normalizationReport"> & { normalizationReport: string }) | undefined;
+    return row ? { ...row, normalizationReport: JSON.parse(row.normalizationReport) } : null;
+  }
+
+  linkMemory(link: Omit<SourceMemoryLink, "createdAt">): void {
+    this.db
+      .prepare(
+        `INSERT INTO source_memory_links (
+           sourceId, revision, memoryId, sourceEventId, chunkHash, locator, createdAt
+         ) VALUES (?, ?, ?, ?, ?, ?, ?)
+         ON CONFLICT(sourceId, revision, memoryId) DO UPDATE SET
+           sourceEventId = excluded.sourceEventId,
+           chunkHash = excluded.chunkHash,
+           locator = excluded.locator`,
+      )
+      .run(
+        link.sourceId,
+        link.revision,
+        link.memoryId,
+        link.sourceEventId ?? null,
+        link.chunkHash ?? null,
+        link.locator ?? null,
+        new Date().toISOString(),
+      );
+  }
+
+  getMemoryLinks(memoryId: string): SourceMemoryLink[] {
+    return this.db
+      .prepare("SELECT * FROM source_memory_links WHERE memoryId = ? ORDER BY createdAt ASC")
+      .all(memoryId) as SourceMemoryLink[];
+  }
+
+  private getChunkHashes(sourceId: string, revision: string): string[] {
+    return (
+      this.db
+        .prepare(
+          "SELECT chunkHash FROM source_chunks WHERE sourceId = ? AND revision = ? ORDER BY ordinal ASC",
+        )
+        .all(sourceId, revision) as Array<{ chunkHash: string }>
+    ).map((row) => row.chunkHash);
+  }
+
+  private migrateLegacyMemorySources(): void {
+    const hasMemories = this.db
+      .prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'memories'")
+      .get();
+    if (!hasMemories) return;
+    const rows = this.db
+      .prepare(
+        `SELECT id, source, sourceType, evidence, createdAt, updatedAt
+         FROM memories
+         WHERE source IS NOT NULL AND source <> ''`,
+      )
+      .all() as Array<{
+      id: string;
+      source: string;
+      sourceType: string;
+      evidence: string | null;
+      createdAt: string;
+      updatedAt: string;
+    }>;
+    for (const row of rows) {
+      let evidence: Record<string, string>;
+      try {
+        evidence = row.evidence ? JSON.parse(row.evidence) : {};
+      } catch {
+        continue;
+      }
+      const revision = evidence.sourceRevision || evidence.sourceHash;
+      if (!revision) continue;
+      const sourceType = legacySourceType(row.sourceType, row.source);
+      const sourceId =
+        evidence.sourceId || createSourceId(sourceType, normalizeSourcePath(row.source));
+      const timestamp = row.updatedAt || row.createdAt || new Date().toISOString();
+      this.db
+        .prepare(
+          `INSERT OR IGNORE INTO source_documents (
+             sourceId, sourceType, sourcePath, latestRevision, health,
+             lastObservedAt, lastProcessedAt, lastError, createdAt, updatedAt
+           ) VALUES (?, ?, ?, ?, 'healthy', ?, ?, NULL, ?, ?)`,
+        )
+        .run(
+          sourceId,
+          sourceType,
+          normalizeSourcePath(row.source),
+          revision,
+          timestamp,
+          timestamp,
+          timestamp,
+          timestamp,
+        );
+      this.db
+        .prepare(
+          `INSERT OR IGNORE INTO source_versions (
+             sourceId, revision, eventId, operation, observedAt, processedAt, normalizationReport
+           ) VALUES (?, ?, ?, 'rescan', ?, ?, ?)`,
+        )
+        .run(
+          sourceId,
+          revision,
+          evidence.sourceEventId || `legacy-${sourceId}-${revision.slice(0, 12)}`,
+          timestamp,
+          timestamp,
+          JSON.stringify({ inputCharacters: 0, outputCharacters: 0, removedNoise: [] }),
+        );
+      this.linkMemory({
+        sourceId,
+        revision,
+        memoryId: row.id,
+        sourceEventId: evidence.sourceEventId,
+        chunkHash: evidence.chunkHash,
+        locator: evidence.location || row.source,
+      });
+    }
   }
 
   markFailed(event: SourceRevisionEvent, error: string): SourceDocument {
@@ -208,6 +434,12 @@ export class SourceRegistry {
       updatedAt: row.updatedAt,
     };
   }
+}
+
+function legacySourceType(sourceType: string, source: string): SourceType {
+  if (sourceType === "listen") return "listen";
+  if (/\.txt$/i.test(source)) return "text";
+  return "markdown";
 }
 
 function normalizeConfiguredPath(sourcePath: string): string {

@@ -6,6 +6,7 @@ import { logger } from "../logger";
 import { getCurrentTime } from "../utils/date";
 import { createEmbeddingModel, createLanguageModel } from "./provider";
 import { ConcurrencyTimeoutError, ModelPool } from "./model-pool";
+import { redactSecrets } from "../security/secret-redactor";
 import type {
   DegradedCapability,
   EmbeddingResponse,
@@ -90,11 +91,12 @@ export class KnowledgeModelAdapter {
     const slot: ModelSlot = modelType;
     const tier = config[slot] || config.standard;
 
+    const safePrompt = redactSecrets(prompt).content;
     try {
       const result = await this.pool.execute(slot, () =>
         generateText({
           model: createLanguageModel(modelType),
-          messages: [{ role: "user", content: prompt }],
+          messages: [{ role: "user", content: safePrompt }],
         }),
       );
       this.llmDegraded = false;
@@ -134,9 +136,10 @@ export class KnowledgeModelAdapter {
       };
     }
 
+    const safeText = redactSecrets(text).content;
     try {
       const result = await this.pool.execute("embedding", () =>
-        embed({ model: createEmbeddingModel(), value: text }),
+        embed({ model: createEmbeddingModel(), value: safeText }),
       );
       this.embeddingDegraded = false;
       return {
