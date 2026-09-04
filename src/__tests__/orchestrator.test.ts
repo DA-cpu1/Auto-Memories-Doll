@@ -236,6 +236,14 @@ vi.mock("../server/services/topic-classification-service", () => ({
   TopicClassificationService: vi.fn(() => ({ classify: topicClassifyMock })),
 }));
 
+const refreshStudyGuidesMock = vi.fn(() => Promise.resolve([]));
+vi.mock("../server/services/study-guide-builder", () => ({
+  StudyGuideBuilder: vi.fn(() => ({
+    refreshTopics: refreshStudyGuidesMock,
+    close: vi.fn(),
+  })),
+}));
+
 // ── mock: 记忆抽取服务（中文拆卡）──
 const extractionExtractMock = vi.fn();
 vi.mock("../server/services/memory-extraction-service", () => ({

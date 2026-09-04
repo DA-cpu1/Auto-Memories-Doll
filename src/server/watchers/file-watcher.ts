@@ -25,6 +25,7 @@ export function startFileWatcher(): void {
     "**/memory.db-journal",
     "**/memory.db-wal",
     "**/archive/**",
+    "**/guides/**",
     "**/notes/**",
   ];
 
@@ -94,7 +95,12 @@ export async function scanMemoryRoot(): Promise<number> {
     for (const rel of all) {
       const normalized = rel.replace(/\\/g, "/");
       if (!normalized.endsWith(".md") && !normalized.endsWith(".markdown")) continue;
-      if (normalized.split("/").some((seg) => seg === "archive" || seg === "notes")) continue;
+      if (
+        normalized
+          .split("/")
+          .some((seg) => seg === "archive" || seg === "notes" || seg === "guides")
+      )
+        continue;
       if (normalized.endsWith("index-map.md") || normalized.endsWith("profile.md")) continue;
       await ingestMarkdownFile(join(root, rel), "scan");
       scanned++;
@@ -130,7 +136,11 @@ async function ingestMarkdownFileOnce(
 ): Promise<void> {
   try {
     const relativePath = filePath.replace(/\\/g, "/");
-    if (relativePath.split("/").some((segment) => segment === "notes" || segment === "archive"))
+    if (
+      relativePath
+        .split("/")
+        .some((segment) => segment === "notes" || segment === "archive" || segment === "guides")
+    )
       return;
     // 跳过本进程最近写入的文件，防止 Markdown 写回 → 监听 → 再次入队的循环
     if (isRecentWrite(filePath)) return;

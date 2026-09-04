@@ -3,6 +3,7 @@ import { dirname } from "path";
 import {
   getMemoryRoot,
   getNotesPath,
+  getGuidesPath,
   getArchivePath,
   getFailuresPath,
   getDeletedPath,
@@ -22,6 +23,7 @@ export const ensureDirectory = async (path: string): Promise<void> => {
 export const initializeMemoryRoot = async (): Promise<void> => {
   await ensureDirectory(getMemoryRoot());
   await ensureDirectory(getNotesPath());
+  await ensureDirectory(getGuidesPath());
   await ensureDirectory(getArchivePath());
   await ensureDirectory(getFailuresPath());
   await ensureDirectory(getDeletedPath());

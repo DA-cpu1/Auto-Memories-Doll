@@ -86,6 +86,17 @@ export const getNotesPath = (): string => {
   return join(getMemoryRoot(), "notes");
 };
 
+export const getGuidesPath = (): string => {
+  return join(getMemoryRoot(), "guides");
+};
+
+export const getStudyGuidePath = (topic: string): string => {
+  if (!/^[\p{L}\p{N}][\p{L}\p{N}_-]{0,127}$/u.test(topic)) {
+    throw new Error(`Invalid study guide topic: ${topic}`);
+  }
+  return join(getGuidesPath(), `${topic}.md`);
+};
+
 export const getTopicPath = (topic: string): string => {
   return join(getNotesPath(), topic);
 };

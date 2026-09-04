@@ -103,4 +103,9 @@ export const apiRouteContracts: Record<string, ApiRouteContract> = {
     responseSchema: "memoryAccessResponseSchema",
     errorCodes: ["NOT_FOUND", "INTERNAL_ERROR"],
   },
+  "src/app/api/topics/[topic]/route.ts": {
+    requestSchema: "studyGuideGenerateRequestSchema",
+    responseSchema: "studyGuideResponseSchema",
+    errorCodes: ["VALIDATION_FAILED", "NOT_FOUND", "GUIDE_GENERATION_FAILED", "INTERNAL_ERROR"],
+  },
 };

@@ -27,6 +27,7 @@ import { generateId } from "../../lib/utils/id";
 import { getCurrentTime } from "../../lib/utils/date";
 import { logger } from "../../lib/logger";
 import { VersionManager } from "../../features/audit/version-manager";
+import { StudyGuideBuilder } from "./study-guide-builder";
 
 const LIST_LIMIT = 500;
 const QUEUE_BATCH_SIZE = 100;
@@ -228,7 +229,11 @@ export class Orchestrator {
       if (event.eventType === "delete") {
         event.status = "processing";
         this.memoryService.updateEvent(event);
-
+        const existing = this.memoryService.getMemory(event.memoryId);
+        if (existing) {
+          this.deferredTopics.add(existing.topic);
+          await deleteFile(getNotePath(existing.topic, existing.id));
+        }
         this.memoryService.deleteMemory(event.memoryId);
 
         event.status = "done";
@@ -410,6 +415,10 @@ export class Orchestrator {
               }
             }
             await this.syncDerivedStores(updated);
+            if (existing.topic !== updated.topic) {
+              this.deferredTopics.add(existing.topic);
+              await deleteFile(getNotePath(existing.topic, existing.id));
+            }
           } else {
             logger.ingest.error("auto_merge 后读取记忆为空，跳过派生同步", {
               memoryId: event.memoryId,
@@ -690,6 +699,7 @@ export class Orchestrator {
       ...topics.map((topic) =>
         updateAgentMarkdown(topic, all).catch(guard("update-agent-markdown", topic)),
       ),
+      this.refreshStudyGuides(topics).catch(guard("refresh-study-guides", topics.join(","))),
       updateIndexMap(all).catch(guard("update-index-map", topics.join(","))),
     ]);
   }
@@ -844,6 +854,7 @@ export class Orchestrator {
       });
       this.memoryService.deleteMemory(memory.id);
     }
+    await this.refreshStudyGuides(new Set(collected.map((memory) => memory.topic)));
     if (collected.length > 0) {
       logger.ingest.info(`[Orchestrator] 重建：已删除 ${collected.length} 张采集卡片，待重扫重采`);
     }
@@ -861,6 +872,7 @@ export class Orchestrator {
     for (const id of ids) {
       const memory = this.memoryService.getMemory(id);
       if (memory) {
+        this.deferredTopics.add(memory.topic);
         // 派生 Markdown 一并删除：残留文件会被重扫重新入队，与重建出的新分卡重复
         await deleteFile(getNotePath(memory.topic, memory.id)).catch(() => {
           // 文件可能不存在，忽略
@@ -934,6 +946,7 @@ export class Orchestrator {
       }
       event.status = "done";
       this.memoryService.updateEvent(event);
+      await this.flushDerivedStores();
     } catch (error) {
       event.status = "failed";
       event.retryCount++;
@@ -1049,6 +1062,7 @@ export class Orchestrator {
     const topics = [...new Set([previous.topic, updated.topic])];
     await Promise.all([
       ...topics.map((topic) => updateAgentMarkdown(topic, all)),
+      this.refreshStudyGuides(topics),
       updateIndexMap(all),
     ]);
     return updated;
@@ -1061,6 +1075,15 @@ export class Orchestrator {
   /** 待人工裁决的 review 事件列表 */
   getReviewEvents(limit?: number): PendingEvent[] {
     return this.memoryService.getEventsByStatus("review", limit);
+  }
+
+  private async refreshStudyGuides(topics: Iterable<string>): Promise<void> {
+    const builder = new StudyGuideBuilder();
+    try {
+      await builder.refreshTopics(topics);
+    } finally {
+      builder.close();
+    }
   }
 
   private detectDuplicateContent(formattedContent: string): {

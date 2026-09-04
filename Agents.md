@@ -737,6 +737,7 @@ export type ConflictRecord = {
 | 产品范围与 LKA-001 目标不一致 | `docs/specs/001-local-knowledge-agent/` 将产品收缩为本地知识整理 Agent，并明确删除聊天、画像、人格 Prompt 和聊天型 MCP/Skills | 已修复：Phase 5 删除范围外页面、API、运行时、scheduler 和依赖；首页改为来源状态、审核和检索入口，旧用户数据保持原位 | ~~P0~~ |
 | Phase 5 与主题资料 API 契约顺序 | T5.8 要求增加主题学习资料契约，但 T6.1 才定义主题资料 schema，且当前没有对应路由 | 已澄清：Phase 5 只登记真实存在的来源状态路由并删除旧契约；主题资料 schema 与真实路由在 T6.1 同步登记，禁止预置 stale contract | ~~P1~~ |
 | 来源版本、块身份与正式知识关系缺失 | LKA-001 FR-004、FR-006、FR-014、FR-015 要求可追溯和增量处理 | 已修复：新增 `source_versions`、`source_chunks`、`source_memory_links`；语义块哈希支持仅噪声变化无操作，发布/人工接受后建立来源关系，旧证据尽可能迁移 | ~~P0~~ |
+| 主题学习资料尚未实现 | LKA-001 FR-013 至 FR-015 要求可阅读、可追溯且增量更新的主题资料 | 已修复：`StudyGuideBuilder` 以已接受知识确定性生成 `guides/{topic}.md`，可选模型只能调整标题和顺序；schema 拒绝非法引用，原子发布先验证临时文件，发布链路只刷新受影响主题 | ~~P0~~ |
 
 ### 11.2 渐进式路线图
 
@@ -808,7 +809,7 @@ Phase 5 — 检索与质量收口 [DONE]
 
 ### 11.3 LKA-001 功能收缩路线图
 
-详细规范位于 `docs/specs/001-local-knowledge-agent/`。Phase 3 至 Phase 5 已完成；当前进入 Phase 6 主题学习资料生成。
+详细规范位于 `docs/specs/001-local-knowledge-agent/`。Phase 3 至 Phase 6 已完成；当前进入 Phase 7 用户界面重构。
 
 ```text
 Phase 0 — 确认范围和建立基线 [DONE]
@@ -847,7 +848,12 @@ Phase 5 — 删除范围外功能 [DONE]
   [x] 删除用户画像、人格 Prompt、聊天型 MCP/Skills 和浏览器历史采集
   [x] 首页替换为来源状态、审核队列、最近进度和快速检索
   [x] API 契约、依赖、单测和 E2E 同步收口，旧用户数据非破坏保留
-Phase 6 — 主题学习资料生成
+Phase 6 — 主题学习资料生成 [DONE]
+  [x] 主题资料 schema、Markdown 编解码与 `/api/topics/[topic]` 契约
+  [x] 按标签和图谱关系生成确定性章节与完整知识/来源版本引用
+  [x] 标准模型可选调整标题和顺序，非法引用回退确定性结果
+  [x] 临时文件复验后的原子发布与内容哈希无变化跳过
+  [x] 发布、删除、重建和冲突解决只刷新受影响主题
 Phase 7 — 用户界面重构
 Phase 8 — 验证和作品集交付
 ```
@@ -860,6 +866,7 @@ Phase 8 — 验证和作品集交付
 - LKA-001 Phase 3 已完成：新增可审计去噪、模型调用前密钥脱敏、语义分块、块级身份、来源版本与正式知识关系；详细结果见 `docs/specs/001-local-knowledge-agent/phase-3-noise-and-provenance.md`
 - LKA-001 Phase 4 已完成：排序、路径、AI 契约、nightly 和配置持久化均已与待删除功能解耦；详细结果见 `docs/specs/001-local-knowledge-agent/phase-4-decoupling.md`
 - LKA-001 Phase 5 已完成：删除范围外聊天、会话、画像、Prompt、MCP/Skills 和浏览器采集运行时，首页改为知识处理概览；详细结果见 `docs/specs/001-local-knowledge-agent/phase-5-scope-removal.md`
+- LKA-001 Phase 6 已完成：新增带合法知识与来源版本引用的确定性主题资料生成、可选模型排序、原子发布和增量刷新；详细结果见 `docs/specs/001-local-knowledge-agent/phase-6-study-guides.md`
 
 - 历史 ChatHandler 系统提示拆分已随 LKA-001 Phase 5 范围收缩删除
 - 已完成审计报告写入拆分：`src/server/services/audit-report-writer.ts`
