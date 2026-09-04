@@ -6,8 +6,13 @@ import MemoryCard from "@/components/memory/MemoryCard";
 import { memoryDetailHref, memoryTopicHref } from "@/lib/memory-api-client";
 import { getTopicLabelClient } from "@/config/topics-data";
 import type { MemoryRecord } from "@/types/memory";
+import type { MemorySearchResult } from "@/types/api";
 
-export default function MemoryLibraryItem({ memory }: { memory: MemoryRecord }) {
+type DisplayMemory = MemoryRecord & Partial<Pick<MemorySearchResult, "score" | "channels">>;
+
+const CHANNEL_LABELS = { vector: "向量", keyword: "关键词", tag: "标签", graph: "图谱" } as const;
+
+export default function MemoryLibraryItem({ memory }: { memory: DisplayMemory }) {
   return (
     <article className="group flex h-full flex-col">
       <Link
@@ -28,6 +33,20 @@ export default function MemoryLibraryItem({ memory }: { memory: MemoryRecord }) 
           查看详情 →
         </Link>
       </div>
+      {memory.score !== undefined ? (
+        <div className="mt-2 flex flex-wrap items-center gap-1.5 px-1 text-xs text-text-tertiary">
+          <span className="font-mono font-semibold text-accent">
+            {Math.round(memory.score * 100)}%
+          </span>
+          <span aria-hidden="true">·</span>
+          <span>来源 {memory.source}</span>
+          {memory.channels?.map((channel) => (
+            <span key={channel} className="tag">
+              {CHANNEL_LABELS[channel]}
+            </span>
+          ))}
+        </div>
+      ) : null}
     </article>
   );
 }

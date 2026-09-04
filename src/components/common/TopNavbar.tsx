@@ -11,7 +11,7 @@ interface NavTab {
 }
 
 const navTabs: NavTab[] = [
-  { id: "home", label: "首页", href: "/" },
+  { id: "home", label: "状态", href: "/" },
   { id: "library", label: "检索库", href: "/memory" },
   { id: "review", label: "审核", href: "/audit" },
   { id: "settings", label: "设置", href: "/settings/ai" },
@@ -22,23 +22,21 @@ export default function TopNavbar() {
 
   const isActive = (href: string) => {
     if (href === "/") return pathname === "/";
+    if (href.startsWith("/settings")) return pathname.startsWith("/settings");
     return pathname.startsWith(href);
   };
 
   return (
-    <header className="sticky top-0 z-50 flex h-14 shrink-0 items-center justify-between px-3 nav-dark sm:px-8">
+    <header className="sticky top-0 z-50 flex h-14 shrink-0 items-center justify-between gap-2 px-2 nav-dark sm:px-6">
       {/* 左侧：Logo + 系统名称 */}
       <Link href="/" className="group flex shrink-0 items-center gap-2 sm:gap-2.5">
-        {/* 循环标志 Logo：暗金色 */}
         <div
-          className="w-7 h-7 animate-logo-morph flex items-center justify-center"
-          style={{ background: "linear-gradient(135deg, #A67C00, #C9A227)" }}
+          aria-hidden="true"
+          className="flex h-7 w-7 items-center justify-center rounded-md border border-[#D4B84A]/60 font-mono text-xs font-bold text-[#D4B84A]"
         >
-          <svg width="14" height="14" viewBox="0 0 16 16" fill="none">
-            <path d="M3 8L8 3L13 8L8 13Z" fill="white" opacity="0.95" />
-          </svg>
+          M
         </div>
-        <span className="text-base font-bold tracking-tight text-[#F5F0E8] group-hover:text-[#D4B84A] transition-colors duration-200">
+        <span className="hidden text-base font-bold text-[#F5F0E8] transition-colors duration-200 group-hover:text-[#D4B84A] sm:block">
           记忆中枢
         </span>
       </Link>
@@ -51,6 +49,7 @@ export default function TopNavbar() {
             <Link
               key={tab.id}
               href={tab.href}
+              aria-current={active ? "page" : undefined}
               className={`relative px-2.5 py-2 text-sm font-medium transition-all duration-200 sm:px-4 ${
                 active
                   ? "text-[#D4B84A] bg-white/10"
@@ -58,9 +57,9 @@ export default function TopNavbar() {
               }`}
             >
               {tab.label}
-              {active && (
+              {active ? (
                 <span className="absolute bottom-0 left-1/2 -translate-x-1/2 w-4 h-0.5 rounded-full bg-[#C9A227]" />
-              )}
+              ) : null}
             </Link>
           );
         })}

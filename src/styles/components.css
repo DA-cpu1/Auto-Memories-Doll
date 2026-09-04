@@ -50,7 +50,30 @@
     cursor: not-allowed;
   }
 
-  /* 次要按钮：白底 + 棕色边框 */
+  .btn-secondary,
+  .btn-ghost,
+  .btn-danger {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.5rem;
+    padding: 0.625rem 1rem;
+    border-radius: var(--radius-sm);
+    font-size: 0.875rem;
+    font-weight: 600;
+    line-height: 1.5;
+    cursor: pointer;
+    transition: all 200ms var(--ease-smooth);
+  }
+
+  .btn-secondary:disabled,
+  .btn-ghost:disabled,
+  .btn-danger:disabled {
+    cursor: not-allowed;
+    opacity: 0.45;
+  }
+
+  /* 次要按钮：白底 + 中性边框 */
   .btn-secondary {
     background: var(--card-bg);
     color: var(--foreground-dim);
@@ -80,6 +103,8 @@
   /* 危险按钮 */
   .btn-danger {
     background: var(--color-error);
+    color: #ffffff;
+    border: 1px solid transparent;
   }
 
   .btn-danger:hover:not(:disabled) {

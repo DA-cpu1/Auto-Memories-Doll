@@ -21,10 +21,17 @@ export type MemoryListResponse = {
 };
 
 export type MemorySearchResponse = {
-  results: MemoryRecord[];
+  results: MemorySearchResult[];
   total: number;
   retrievalMode: "vector" | "keyword" | null;
   degradedMode: boolean;
+};
+
+export type MemorySearchResult = MemoryRecord & {
+  /** 最终用于排序的归一化相关度。 */
+  score: number;
+  /** 实际参与本次命中的召回通道。 */
+  channels: Array<"vector" | "keyword" | "tag" | "graph">;
 };
 
 export type MemoryWriteRequest = {

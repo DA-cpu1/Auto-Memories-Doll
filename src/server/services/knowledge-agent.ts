@@ -8,6 +8,7 @@ import { ConversationProcessor, KnowledgeCard } from "../../features/ingest/conv
 import { buildKnowledgeLogFromText } from "../../features/ingest/knowledge-log";
 import { assertAgentStageTransition } from "../../features/agent/state-machine";
 import { buildMemoryRecord } from "../../lib/memory/builder";
+import { validateMemoryRecord } from "../../lib/memory/validator";
 import { getDatabase } from "../../lib/storage/database";
 import { parseMemoryFromText } from "../../lib/storage/markdown-parser";
 import { parseSourceRevisionEvent } from "../../lib/source/source-revision";
@@ -383,6 +384,35 @@ export class KnowledgeAgent {
 
   getReviewEvents(limit?: number): PendingEvent[] {
     return this.memoryService.getEventsByStatus("review", limit);
+  }
+
+  updateReviewCandidate(
+    eventId: string,
+    updates: Pick<MemoryRecord, "title" | "summary" | "content" | "tags" | "topic">,
+  ): PendingEvent {
+    const event = this.memoryService.getEvent(eventId);
+    if (!event || event.status !== "review") {
+      throw new Error("待审核事件不存在或状态已变化");
+    }
+
+    const candidate = JSON.parse(event.candidate) as MemoryRecord;
+    const nextCandidate: MemoryRecord = {
+      ...candidate,
+      ...updates,
+      title: updates.title.trim(),
+      summary: updates.summary.trim(),
+      content: updates.content.trim(),
+      tags: updates.tags.map((tag) => tag.trim()).filter(Boolean),
+      topic: updates.topic.trim(),
+      updatedAt: new Date().toISOString(),
+    };
+    if (!validateMemoryRecord(nextCandidate)) {
+      throw new Error("编辑后的候选不符合记忆结构约束");
+    }
+    this.memoryService.updateEventCandidate(eventId, nextCandidate, [
+      ...new Set([...event.changedFields, "title", "summary", "content", "tags", "topic"]),
+    ]);
+    return { ...event, candidate: JSON.stringify(nextCandidate) };
   }
 
   async processIngest(

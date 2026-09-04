@@ -27,12 +27,14 @@ export async function GET(request: NextRequest) {
   try {
     let candidateIds: string[] = [];
     let retrievalMode: RetrievalMode | null = null;
+    let scores = new Map<string, number>();
 
     if (query) {
       // 语义检索；Embedding 不可用时 Retriever 自动切换关键词召回。
       const search = await retriever.searchDetailed(query, limit, threshold);
       retrievalMode = search.mode;
       candidateIds = search.results.map((result) => result.memoryId);
+      scores = new Map(search.results.map((result) => [result.memoryId, result.similarity]));
     }
 
     if (category) {
@@ -44,9 +46,15 @@ export async function GET(request: NextRequest) {
     }
 
     const memories = memoryService.getMemoriesByIds(candidateIds.slice(0, limit));
-    const formattedResults = category
-      ? memories.map((memory) => ({ ...memory, category }))
-      : memories;
+    const formattedResults = memories.map((memory) => ({
+      ...memory,
+      ...(category ? { category } : {}),
+      score: scores.get(memory.id) ?? (category ? 1 : 0),
+      channels: [
+        ...(retrievalMode ? [retrievalMode] : []),
+        ...(category ? (["tag"] as const) : []),
+      ],
+    }));
 
     return NextResponse.json(
       apiResponse({

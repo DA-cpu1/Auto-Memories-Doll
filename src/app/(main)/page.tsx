@@ -14,16 +14,35 @@ type SearchResult = {
   summaryZh?: string;
   topic: string;
   score?: number;
+  source?: string;
+  channels?: string[];
 };
 
 type SourceStatus = {
   agent?: {
-    sources?: unknown[];
+    sources?: Array<{
+      sourceId: string;
+      sourceType: string;
+      sourcePath?: string;
+      latestRevision?: string;
+      health: string;
+      lastObservedAt?: string;
+      lastProcessedAt?: string;
+      lastError?: string;
+    }>;
     progress?: Array<{
       progressId: string;
+      eventId: string;
       stage: string;
       timestamp: string;
       sourceId: string;
+      revision: string;
+      outcome: string;
+      durationMs: number;
+      attempt: number;
+      retryable: boolean;
+      error?: string;
+      degradedCapabilities: string[];
     }>;
   };
   watchers?: {
@@ -94,7 +113,11 @@ export default function DashboardPage() {
   const activeWatcherCount =
     (sourceStatus?.watchers?.fileWatcher?.running ? 1 : 0) +
     (sourceStatus?.watchers?.toolSources?.length ?? 0);
-  const recentProgress = sourceStatus?.agent?.progress?.slice(0, 5) ?? [];
+  const recentProgress = sourceStatus?.agent?.progress?.slice(-5).reverse() ?? [];
+  const sources = sourceStatus?.agent?.sources ?? [];
+  const degraded = [
+    ...new Set(recentProgress.flatMap((progress) => progress.degradedCapabilities || [])),
+  ];
   const events = queueStatus?.events;
 
   return (
@@ -105,7 +128,7 @@ export default function DashboardPage() {
             Local Knowledge Agent
           </p>
           <h1 className="text-2xl font-bold text-[#3E3224] sm:text-3xl">知识处理概览</h1>
-          <p className="mt-2 text-sm text-[#6F604B]">来源、审核队列与检索状态</p>
+          <p className="mt-2 text-sm text-[#6F604B]">来源健康、处理事件、审核队列与检索状态</p>
         </div>
         <button type="button" className="btn btn-secondary self-start" onClick={loadStatus}>
           刷新状态
@@ -138,6 +161,17 @@ export default function DashboardPage() {
           ))}
         </div>
       </section>
+
+      {degraded.length > 0 ? (
+        <div
+          role="status"
+          className="mt-4 border-l-2 border-[#A67C00] bg-[#FFF8DF] px-4 py-3 text-sm text-[#6F5400]"
+        >
+          当前降级能力：
+          {degraded.map((item) => (item === "llm" ? "LLM 加工" : "Embedding 检索")).join("、")}
+          。确定性处理继续运行，需要模型的候选将等待审核。
+        </div>
+      ) : null}
 
       <div className="mt-6 grid gap-6 lg:grid-cols-[minmax(0,1.45fr)_minmax(280px,0.75fr)]">
         <section className="rounded-lg border border-[#E0D6C7] bg-[#FFFDF9] p-5 sm:p-6">
@@ -187,6 +221,13 @@ export default function DashboardPage() {
                         <p className="mt-1 line-clamp-2 text-sm text-[#6F604B]">
                           {result.summaryZh || result.summary}
                         </p>
+                        <p className="mt-2 flex flex-wrap gap-x-3 gap-y-1 text-xs text-[#8B7355]">
+                          <span>主题 {result.topic}</span>
+                          <span>来源 {result.source || "未知"}</span>
+                          {result.channels?.length ? (
+                            <span>命中 {result.channels.join(" + ")}</span>
+                          ) : null}
+                        </p>
                       </button>
                     </li>
                   ))}
@@ -221,7 +262,8 @@ export default function DashboardPage() {
                     </time>
                   </div>
                   <p className="mt-1 truncate font-mono text-xs text-[#8B7355]">
-                    {progress.sourceId}
+                    {progress.sourceId} · {progress.outcome || "completed"} ·{" "}
+                    {progress.durationMs ?? 0}ms
                   </p>
                 </li>
               ))}
@@ -231,6 +273,68 @@ export default function DashboardPage() {
           )}
         </aside>
       </div>
+
+      <section aria-labelledby="sources-heading" className="mt-6">
+        <div className="mb-3 flex items-center justify-between gap-4">
+          <h2 id="sources-heading" className="text-base font-semibold text-[#3E3224]">
+            来源健康与最近版本
+          </h2>
+          <Link
+            href="/settings/tools"
+            className="text-sm font-medium text-[#8B6500] hover:underline"
+          >
+            管理来源
+          </Link>
+        </div>
+        {sources.length > 0 ? (
+          <div className="overflow-x-auto border-y border-[#D8CEBE] bg-[#FFFDF9]">
+            <table className="w-full min-w-[720px] text-left text-sm">
+              <thead className="bg-[#F5F0E8] text-xs text-[#8B7355]">
+                <tr>
+                  <th className="px-4 py-3 font-medium">来源</th>
+                  <th className="px-4 py-3 font-medium">健康</th>
+                  <th className="px-4 py-3 font-medium">最近版本</th>
+                  <th className="px-4 py-3 font-medium">最后处理</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-[#ECE4D8]">
+                {sources.map((source) => (
+                  <tr key={source.sourceId}>
+                    <td className="max-w-[360px] px-4 py-3">
+                      <p className="font-medium text-[#3E3224]">{source.sourceType}</p>
+                      <p className="break-all font-mono text-xs text-[#8B7355]">
+                        {source.sourcePath || source.sourceId}
+                      </p>
+                    </td>
+                    <td className="px-4 py-3">
+                      <span
+                        className={`status-tag ${source.health === "healthy" ? "status-tag--success" : source.health === "unavailable" ? "status-tag--error" : "status-tag--pending"}`}
+                      >
+                        {source.health}
+                      </span>
+                    </td>
+                    <td className="px-4 py-3 font-mono text-xs text-[#6F604B]">
+                      {source.latestRevision?.slice(0, 12) || "尚未观察"}
+                    </td>
+                    <td className="px-4 py-3 text-xs text-[#6F604B]">
+                      {source.lastProcessedAt
+                        ? new Date(source.lastProcessedAt).toLocaleString("zh-CN")
+                        : "尚未处理"}
+                      {source.lastError ? (
+                        <p className="mt-1 max-w-xs text-[#A14C37]">{source.lastError}</p>
+                      ) : null}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        ) : (
+          <p className="border-y border-[#D8CEBE] py-8 text-center text-sm text-[#8B7355]">
+            尚未登记来源。
+          </p>
+        )}
+      </section>
 
       <nav aria-label="快捷入口" className="mt-6 grid gap-3 sm:grid-cols-3">
         {[

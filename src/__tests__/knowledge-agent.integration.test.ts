@@ -150,6 +150,21 @@ describe.sequential("KnowledgeAgent source orchestration", () => {
       sourceRevision: event.revision,
     });
     expect(queue.getMemory(staged.memoryIds[0])).toBeNull();
+    const original = JSON.parse(review.candidate);
+    agent.updateReviewCandidate(review.eventId, {
+      title: "人工修订标题",
+      summary: "人工修订摘要",
+      content: original.content,
+      tags: [...original.tags, "reviewed"],
+      topic: original.topic,
+    });
+    const edited = JSON.parse(queue.getEvent(review.eventId)!.candidate);
+    expect(edited).toMatchObject({
+      title: "人工修订标题",
+      summary: "人工修订摘要",
+      tags: expect.arrayContaining(["reviewed"]),
+    });
+    expect(queue.getMemory(staged.memoryIds[0])).toBeNull();
     queue.close();
     expect(agent.listProgress({ eventId: event.eventId }).slice(-2)).toEqual([
       expect.objectContaining({ stage: "processing", outcome: "completed" }),

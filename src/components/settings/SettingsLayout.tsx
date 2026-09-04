@@ -36,8 +36,9 @@ export default function SettingsLayout({ children }: { children: React.ReactNode
               <Link
                 key={tab.id}
                 href={tab.href}
+                aria-current={isActive ? "page" : undefined}
                 className={`block rounded-lg px-3 py-2.5 text-sm font-medium transition-colors ${
-                  isActive ? "bg-[#A67C00] text-white" : "text-[#5D4E37] hover:bg-[#F0EBE1]"
+                  isActive ? "bg-accent text-white" : "text-text-secondary hover:bg-muted"
                 }`}
               >
                 {tab.label}

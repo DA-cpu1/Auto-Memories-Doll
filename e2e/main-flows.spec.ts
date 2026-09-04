@@ -24,7 +24,7 @@ test("首页展示处理状态并可进入来源设置", async ({ page }) => {
   await page.getByRole("link", { name: /来源设置/ }).click();
 
   await expect(page).toHaveURL(/\/settings\/tools$/);
-  await expect(page.getByRole("heading", { name: "工具监听" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "来源设置" })).toBeVisible();
   expect(diagnostics).toEqual([]);
 });
 
@@ -77,7 +77,7 @@ test("检索库可以进入唯一知识图谱页面", async ({ page }) => {
   expect(diagnostics).toEqual([]);
 });
 
-test("设置侧栏可以进入工具监听并显示选中态", async ({ page }) => {
+test("设置侧栏可以进入来源设置并显示选中态", async ({ page }) => {
   const diagnostics = collectBrowserDiagnostics(page);
 
   await page.goto("/");
@@ -85,8 +85,11 @@ test("设置侧栏可以进入工具监听并显示选中态", async ({ page }) 
   await page.getByRole("link", { name: "来源监听", exact: true }).click();
 
   await expect(page).toHaveURL(/\/settings\/tools$/);
-  await expect(page.getByRole("heading", { name: "工具监听" })).toBeVisible();
-  await expect(page.locator('aside a[href="/settings/tools"]')).toHaveClass(/bg-\[#A67C00\]/);
+  await expect(page.getByRole("heading", { name: "来源设置" })).toBeVisible();
+  await expect(page.locator('aside a[href="/settings/tools"]')).toHaveAttribute(
+    "aria-current",
+    "page",
+  );
   expect(diagnostics).toEqual([]);
 });
 

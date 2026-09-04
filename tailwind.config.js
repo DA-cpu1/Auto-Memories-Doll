@@ -27,8 +27,8 @@ module.exports = {
         accent: "var(--color-accent)",
         "accent-hover": "var(--color-accent-hover)",
         "accent-text": "var(--color-accent-text)",
-        "accent-light": "#D4B84A",
-        "accent-soft": "rgba(166, 124, 0, 0.10)",
+        "accent-light": "var(--accent-light)",
+        "accent-soft": "var(--accent-soft)",
         muted: "var(--color-muted)",
         /* 状态色（暖色调） */
         error: "var(--color-error)",
@@ -60,10 +60,10 @@ module.exports = {
       },
       borderRadius: {
         sm: "6px",
-        DEFAULT: "10px",
-        md: "10px",
-        lg: "16px",
-        xl: "20px",
+        DEFAULT: "8px",
+        md: "8px",
+        lg: "8px",
+        xl: "8px",
         full: "9999px",
       },
       boxShadow: {
@@ -79,7 +79,6 @@ module.exports = {
       fontFamily: {
         sans: [
           '"Geist"',
-          '"Inter"',
           '"PingFang SC"',
           '"Microsoft YaHei"',
           'sans-serif',
@@ -91,6 +90,7 @@ module.exports = {
           '"Cascadia Code"',
           '"Consolas"',
           '"PingFang SC"',
+          '"Microsoft YaHei"',
           'monospace',
         ],
         // 显示字体（用于 Hero 标题）
@@ -99,6 +99,8 @@ module.exports = {
           '"SF Mono"',
           '"Cascadia Code"',
           '"Consolas"',
+          '"PingFang SC"',
+          '"Microsoft YaHei"',
           'monospace',
         ],
       },

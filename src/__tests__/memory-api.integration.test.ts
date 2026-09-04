@@ -112,6 +112,7 @@ describe("memory list/search/ingest HTTP contracts", () => {
     expect(body.data.total).toBe(1);
     expect(body.data.retrievalMode).toBe("vector");
     expect(body.data.degradedMode).toBe(false);
+    expect(body.data.results[0]).toMatchObject({ score: 0.92, channels: ["vector"] });
   });
 
   it("GET /api/memory/search exposes keyword degradation mode", async () => {
@@ -128,6 +129,7 @@ describe("memory list/search/ingest HTTP contracts", () => {
     expect(response.status).toBe(200);
     expect(body.data.retrievalMode).toBe("keyword");
     expect(body.data.degradedMode).toBe(true);
+    expect(body.data.results[0]).toMatchObject({ score: 0.6, channels: ["keyword"] });
   });
 
   it("GET /api/memory/search batch-loads matching memories", async () => {

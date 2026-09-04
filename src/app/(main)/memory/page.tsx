@@ -8,6 +8,7 @@ import MemoryLibraryItem from "@/components/memory/MemoryLibraryItem";
 import { listMemoriesClient, searchMemoriesClient } from "@/lib/memory-api-client";
 import { defaultTopicLabels } from "@/config/topics-data";
 import type { MemoryRecord } from "@/types/memory";
+import type { MemorySearchResult } from "@/types/api";
 
 const PAGE_SIZE = 12;
 const SEARCH_LIMIT = 50;
@@ -28,7 +29,9 @@ function LoadingState({ label }: { label: string }) {
 }
 
 export default function MemoryLibraryPage() {
-  const [memories, setMemories] = useState<MemoryRecord[]>([]);
+  const [memories, setMemories] = useState<
+    Array<MemoryRecord & Partial<Pick<MemorySearchResult, "score" | "channels">>>
+  >([]);
   const [total, setTotal] = useState(0);
   const [page, setPage] = useState(1);
   const [activeTopic, setActiveTopic] = useState("all");
@@ -246,7 +249,7 @@ export default function MemoryLibraryPage() {
             description={
               searchMode
                 ? "尝试更换关键词或检查拼写。"
-                : "先开始一段对话或导入内容，记忆会出现在这里。"
+                : "先配置来源或导入内容，通过审核的知识会出现在这里。"
             }
           />
         ) : (

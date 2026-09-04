@@ -15,29 +15,29 @@
 
 :root {
   /* ── 色彩系统 (Brown-White-Gold Pop) ── */
-  --background: #2c2416;
-  --background-elevated: #3d3425;
-  --background-warm: #f5f0e8;
+  --background: #202826;
+  --background-elevated: #2c3734;
+  --background-warm: #f4f3ee;
 
   /* 前景文字：深棕系 */
-  --foreground: #3e3224;
-  --foreground-dim: #5d4e37;
-  --foreground-subtle: #8b7355;
-  --muted: #a69780;
+  --foreground: #202826;
+  --foreground-dim: #46524e;
+  --foreground-subtle: #687570;
+  --muted: #8f9995;
 
   /* 强调色：暗金色系 */
-  --accent: #a67c00;
-  --accent-hover: #c9a227;
-  --accent-light: #d4b84a;
-  --accent-soft: rgba(166, 124, 0, 0.1);
-  --accent-line: rgba(166, 124, 0, 0.3);
-  --accent-glow: rgba(201, 162, 39, 0.15);
+  --accent: #0f766e;
+  --accent-hover: #0b5f59;
+  --accent-light: #3f9c93;
+  --accent-soft: rgba(15, 118, 110, 0.09);
+  --accent-line: rgba(15, 118, 110, 0.28);
+  --accent-glow: rgba(15, 118, 110, 0.14);
 
   /* 卡片系统：暖白色系 */
-  --card-bg: #fffdf9;
-  --card-bg-alt: #faf7f2;
-  --card-border: #e8e0d4;
-  --card-border-hover: #d4c8b5;
+  --card-bg: #fffefa;
+  --card-bg-alt: #f0f1ec;
+  --card-border: #d9ddd7;
+  --card-border-hover: #aebbb5;
 
   /* 波普点装饰 */
   --pop-dot-color: rgba(166, 124, 0, 0.08);
@@ -80,9 +80,9 @@
 
   /* 圆角 */
   --radius-sm: 6px;
-  --radius-md: 10px;
-  --radius-lg: 16px;
-  --radius-xl: 20px;
+  --radius-md: 8px;
+  --radius-lg: 8px;
+  --radius-xl: 8px;
   --radius-full: 9999px;
 
   /* 阴影（暖色调柔和阴影） */
@@ -120,7 +120,7 @@ body {
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
   line-height: 1.6;
-  letter-spacing: -0.01em;
+  letter-spacing: 0;
   min-height: 100vh;
 }
 

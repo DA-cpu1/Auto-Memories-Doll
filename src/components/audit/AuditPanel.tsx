@@ -1,8 +1,6 @@
 "use client";
 
-/* eslint-disable no-console -- 审计操作失败需要保留浏览器端诊断信息。 */
-
-import { useState, useEffect, useCallback, useRef } from "react";
+import { useCallback, useEffect, useState } from "react";
 
 type ConflictRecord = {
   conflictId: string;
@@ -11,664 +9,495 @@ type ConflictRecord = {
   field: string;
   existingValue: string;
   candidateValue: string;
-  status: string;
   createdAt: string;
 };
-
-type AuditReport = {
-  totalMemories: number;
-  pendingEvents: number;
-  conflicts: number;
+type AuditReport = { totalMemories: number; pendingEvents: number; conflicts: number };
+type ReviewCandidate = {
+  title: string;
+  summary: string;
+  content: string;
+  tags: string[];
+  topic: string;
+  kind: string;
+  source: string;
+  evidence?: { text: string; location?: string };
 };
-
 type ReviewEvent = {
   eventId: string;
   memoryId: string | null;
   sourceType: string;
+  sourceId?: string;
+  sourceRevision?: string;
   createdAt: string;
   retryCount: number;
-  candidate: {
-    title: string;
-    summary: string | null;
-    contentPreview: string;
-    tags: string[];
-  } | null;
+  reasonCode: string;
+  reason: string;
+  candidate: ReviewCandidate | null;
 };
+type Tab = "review" | "conflicts" | "report";
 
 export default function AuditPanel() {
   const [report, setReport] = useState<AuditReport | null>(null);
   const [conflicts, setConflicts] = useState<ConflictRecord[]>([]);
-  const [reviewEvents, setReviewEvents] = useState<ReviewEvent[]>([]);
+  const [reviews, setReviews] = useState<ReviewEvent[]>([]);
+  const [activeTab, setActiveTab] = useState<Tab>("review");
   const [loading, setLoading] = useState(true);
-  const [replaying, setReplaying] = useState(false);
-  const [resolvingId, setResolvingId] = useState<string | null>(null);
+  const [error, setError] = useState("");
+  const [workingId, setWorkingId] = useState<string | null>(null);
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [draft, setDraft] = useState<ReviewCandidate | null>(null);
   const [manualValues, setManualValues] = useState<Record<string, string>>({});
-  const [activeTab, setActiveTab] = useState<"report" | "conflicts" | "review">("report");
-  const [scanning, setScanning] = useState(false);
-  const [importing, setImporting] = useState(false);
-  const [rebuilding, setRebuilding] = useState(false);
-  const [importMessage, setImportMessage] = useState<string | null>(null);
-  const fileInputRef = useRef<HTMLInputElement>(null);
 
-  const fetchData = useCallback(async () => {
+  const load = useCallback(async () => {
     setLoading(true);
+    setError("");
     try {
-      const [reportRes, conflictRes, reviewRes] = await Promise.all([
+      const [reportResponse, conflictResponse, reviewResponse] = await Promise.all([
         fetch("/api/audit"),
         fetch("/api/audit/conflicts"),
         fetch("/api/audit/review-events"),
       ]);
-      if (reportRes.ok) setReport(await reportRes.json());
-      if (conflictRes.ok) setConflicts(await conflictRes.json());
-      if (reviewRes.ok) {
-        const data = await reviewRes.json();
-        setReviewEvents(data.items || []);
-      }
-    } catch (e) {
-      console.error("获取审计数据失败:", e);
+      if (!reportResponse.ok || !conflictResponse.ok || !reviewResponse.ok)
+        throw new Error("审计数据加载失败");
+      const reviewPayload = await reviewResponse.json();
+      setReport(await reportResponse.json());
+      setConflicts(await conflictResponse.json());
+      setReviews(reviewPayload.items || []);
+    } catch (loadError) {
+      setError(loadError instanceof Error ? loadError.message : "审计数据加载失败");
     } finally {
       setLoading(false);
     }
   }, []);
 
-  useEffect(() => {
-    fetchData();
-  }, [fetchData]);
+  useEffect(() => void load(), [load]);
 
-  const handleReplay = async () => {
-    setReplaying(true);
+  const decideReview = async (
+    review: ReviewEvent,
+    action: "accept" | "reject",
+    edited?: ReviewCandidate,
+  ) => {
+    setWorkingId(review.eventId);
+    setError("");
     try {
-      const res = await fetch("/api/audit", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action: "replay" }),
-      });
-      if (res.ok) {
-        await fetchData();
-      }
-    } catch (e) {
-      console.error("重放失败:", e);
-    } finally {
-      setReplaying(false);
-    }
-  };
-
-  const handleResolve = async (conflictId: string, resolution: "accept" | "keep" | "manual") => {
-    setResolvingId(conflictId);
-    try {
-      const res = await fetch("/api/audit/conflicts", {
+      const response = await fetch("/api/audit/review-events", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          conflictId,
-          resolution,
-          ...(resolution === "manual" ? { manualValue: manualValues[conflictId] ?? "" } : {}),
+          eventId: review.eventId,
+          action,
+          ...(edited ? { candidate: edited } : {}),
         }),
       });
-      if (res.ok) {
-        setConflicts((prev) => prev.filter((c) => c.conflictId !== conflictId));
-        setManualValues((prev) => {
-          const next = { ...prev };
-          delete next[conflictId];
-          return next;
-        });
-      }
-    } catch (e) {
-      console.error("解决冲突失败:", e);
+      const payload = await response.json();
+      if (!response.ok) throw new Error(payload.error || "裁决失败");
+      setReviews((items) => items.filter((item) => item.eventId !== review.eventId));
+      setEditingId(null);
+      setDraft(null);
+    } catch (decisionError) {
+      setError(decisionError instanceof Error ? decisionError.message : "裁决失败");
     } finally {
-      setResolvingId(null);
+      setWorkingId(null);
     }
   };
 
-  const handleReviewDecision = async (eventId: string, action: "accept" | "reject") => {
-    setResolvingId(eventId);
+  const resolveConflict = async (
+    conflict: ConflictRecord,
+    resolution: "accept" | "keep" | "manual",
+  ) => {
+    setWorkingId(conflict.conflictId);
+    setError("");
     try {
-      const res = await fetch("/api/audit/review-events", {
+      const response = await fetch("/api/audit/conflicts", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ eventId, action }),
+        body: JSON.stringify({
+          conflictId: conflict.conflictId,
+          resolution,
+          ...(resolution === "manual"
+            ? { manualValue: manualValues[conflict.conflictId] || "" }
+            : {}),
+        }),
       });
-      if (res.ok) {
-        setReviewEvents((prev) => prev.filter((e) => e.eventId !== eventId));
-      }
-    } catch (e) {
-      console.error("人工裁决失败:", e);
+      const payload = await response.json();
+      if (!response.ok) throw new Error(payload.error || "冲突裁决失败");
+      setConflicts((items) => items.filter((item) => item.conflictId !== conflict.conflictId));
+    } catch (resolveError) {
+      setError(resolveError instanceof Error ? resolveError.message : "冲突裁决失败");
     } finally {
-      setResolvingId(null);
+      setWorkingId(null);
     }
   };
 
-  const handleScan = async () => {
-    setScanning(true);
-    setImportMessage(null);
-    try {
-      const res = await fetch("/api/listen/scan", { method: "POST" });
-      const data = await res.json();
-      setImportMessage(data.message || (res.ok ? "扫描完成" : "扫描失败"));
-    } catch (e) {
-      console.error("扫描失败:", e);
-      setImportMessage("扫描失败，请查看服务端日志");
-    } finally {
-      setScanning(false);
-    }
-  };
-
-  const handleRebuild = async () => {
-    if (
-      !confirm(
-        "重建将删除所有文件采集的记忆卡片（对话/手动创建的不受影响），然后全量重扫重新生成中文卡片。继续？",
-      )
-    ) {
-      return;
-    }
-    setRebuilding(true);
-    setImportMessage(null);
-    try {
-      const res = await fetch("/api/listen/rebuild", { method: "POST" });
-      const data = await res.json();
-      setImportMessage(data.message || (res.ok ? "重建已启动" : "重建失败"));
-    } catch (e) {
-      console.error("重建失败:", e);
-      setImportMessage("重建失败，请查看服务端日志");
-    } finally {
-      setRebuilding(false);
-    }
-  };
-
-  const handleImport = async (files: FileList | null) => {
-    if (!files || files.length === 0) return;
-    setImporting(true);
-    setImportMessage(null);
-    try {
-      const lines: string[] = [];
-      for (const file of Array.from(files)) {
-        const form = new FormData();
-        form.append("file", file);
-        const res = await fetch("/api/listen/import", { method: "POST", body: form });
-        const data = await res.json();
-        const result = data.results?.[0];
-        if (res.ok && result?.success) {
-          lines.push(`「${file.name}」导入成功，已保存到 ${result.savedPath}`);
-        } else {
-          lines.push(
-            `「${file.name}」导入失败：${result?.error || data.error?.message || "未知错误"}`,
-          );
-        }
-      }
-      setImportMessage(lines.join("\n"));
-    } catch (e) {
-      console.error("导入失败:", e);
-      setImportMessage("导入失败，请查看服务端日志");
-    } finally {
-      setImporting(false);
-      if (fileInputRef.current) fileInputRef.current.value = "";
-    }
-  };
-
-  if (loading) {
-    return (
-      <div className="flex-1 flex items-center justify-center">
-        <div className="loading-dots">
-          <span />
-          <span />
-          <span />
-        </div>
-      </div>
-    );
-  }
+  const tabs: Array<{ id: Tab; label: string; count?: number }> = [
+    { id: "review", label: "待审核候选", count: reviews.length },
+    { id: "conflicts", label: "字段冲突", count: conflicts.length },
+    { id: "report", label: "审计概览" },
+  ];
 
   return (
-    <div className="flex-1 overflow-y-auto px-4 py-6">
-      <div className="max-w-4xl mx-auto">
-        <div className="flex items-center justify-between mb-6">
-          <div>
-            <h2
-              className="text-xl font-semibold tracking-tight"
-              style={{ color: "var(--color-text-primary)" }}
-            >
-              审计与冲突
-            </h2>
-            <p className="text-xs mt-1" style={{ color: "var(--color-text-tertiary)" }}>
-              管理记忆版本冲突和待处理事件
-            </p>
-          </div>
+    <div className="mx-auto w-full max-w-6xl px-4 py-8 sm:px-6 sm:py-10">
+      <header className="mb-7 flex flex-col gap-4 border-b border-border pb-7 sm:flex-row sm:items-end sm:justify-between">
+        <div>
+          <p className="mb-2 font-mono text-xs font-semibold uppercase text-text-tertiary">
+            Decision desk
+          </p>
+          <h1 className="text-3xl font-bold text-text-primary">审核工作台</h1>
+          <p className="mt-2 text-sm text-text-secondary">所有不确定内容在发布前都需要明确裁决。</p>
         </div>
+        <button
+          type="button"
+          className="btn-secondary self-start"
+          onClick={() => void load()}
+          disabled={loading}
+        >
+          刷新
+        </button>
+      </header>
 
-        <div className="flex gap-2 mb-6">
+      <nav
+        aria-label="审核视图"
+        className="mb-7 flex max-w-full gap-1 overflow-x-auto border-b border-border"
+      >
+        {tabs.map((tab) => (
           <button
-            onClick={() => setActiveTab("report")}
-            className={`text-sm px-4 py-2 rounded-lg transition-colors ${
-              activeTab === "report"
-                ? "bg-[rgba(166,124,0,0.08)] text-[#A67C00] font-semibold"
-                : "hover:bg-[#FAF7F2]"
-            }`}
-            style={activeTab === "report" ? {} : { color: "#8B7355" }}
+            key={tab.id}
+            type="button"
+            className={`shrink-0 border-b-2 px-3 py-3 text-sm font-medium ${activeTab === tab.id ? "border-accent text-accent" : "border-transparent text-text-secondary hover:text-text-primary"}`}
+            onClick={() => setActiveTab(tab.id)}
           >
-            总览
+            {tab.label}
+            {tab.count !== undefined ? ` ${tab.count}` : ""}
           </button>
-          <button
-            onClick={() => setActiveTab("conflicts")}
-            className={`text-sm px-4 py-2 rounded-lg transition-colors ${
-              activeTab === "conflicts"
-                ? "bg-[rgba(166,124,0,0.08)] text-[#A67C00] font-semibold"
-                : "hover:bg-[#FAF7F2]"
-            }`}
-            style={activeTab === "conflicts" ? {} : { color: "#8B7355" }}
-          >
-            冲突 ({conflicts.length})
-          </button>
-          <button
-            onClick={() => setActiveTab("review")}
-            className={`text-sm px-4 py-2 rounded-lg transition-colors ${
-              activeTab === "review"
-                ? "bg-[rgba(166,124,0,0.08)] text-[#A67C00] font-semibold"
-                : "hover:bg-[#FAF7F2]"
-            }`}
-            style={activeTab === "review" ? {} : { color: "#8B7355" }}
-          >
-            人工裁决 ({reviewEvents.length})
-          </button>
+        ))}
+      </nav>
+      {error ? (
+        <div
+          role="alert"
+          className="mb-5 border-l-2 border-error bg-error-bg px-4 py-3 text-sm text-error"
+        >
+          {error}
         </div>
+      ) : null}
+      {loading ? <EmptyLine>正在读取审计队列…</EmptyLine> : null}
 
-        {activeTab === "report" && (
-          <div className="space-y-6">
-            <div className="grid grid-cols-3 gap-4">
-              <div
-                className="bg-white border rounded-xl p-5 text-center"
-                style={{
-                  borderColor: "var(--color-border-default)",
-                  boxShadow: "var(--shadow-card)",
-                }}
-              >
-                <div
-                  className="text-3xl font-bold mb-1"
-                  style={{ color: "var(--color-brand-blue)" }}
+      {!loading && activeTab === "review" ? (
+        reviews.length === 0 ? (
+          <EmptyLine>没有等待裁决的候选。</EmptyLine>
+        ) : (
+          <div className="space-y-5">
+            {reviews.map((review) => {
+              const candidate = editingId === review.eventId ? draft : review.candidate;
+              return (
+                <article
+                  key={review.eventId}
+                  className="overflow-hidden rounded-lg border border-border bg-surface"
                 >
-                  {report?.totalMemories ?? 0}
-                </div>
-                <div className="text-xs" style={{ color: "var(--color-text-tertiary)" }}>
-                  记忆总数
-                </div>
-              </div>
-              <div
-                className="bg-white border rounded-xl p-5 text-center"
-                style={{
-                  borderColor: "var(--color-border-default)",
-                  boxShadow: "var(--shadow-card)",
-                }}
-              >
-                <div
-                  className="text-3xl font-bold mb-1"
-                  style={{ color: "var(--color-brand-orange)" }}
-                >
-                  {report?.pendingEvents ?? 0}
-                </div>
-                <div className="text-xs" style={{ color: "var(--color-text-tertiary)" }}>
-                  待处理事件
-                </div>
-              </div>
-              <div
-                className="bg-white border rounded-xl p-5 text-center"
-                style={{
-                  borderColor: "var(--color-border-default)",
-                  boxShadow: "var(--shadow-card)",
-                }}
-              >
-                <div className="text-3xl font-bold mb-1 text-red-600">{report?.conflicts ?? 0}</div>
-                <div className="text-xs" style={{ color: "var(--color-text-tertiary)" }}>
-                  待解决冲突
-                </div>
-              </div>
-            </div>
-
-            <div
-              className="bg-white border rounded-xl p-5"
-              style={{
-                borderColor: "var(--color-border-default)",
-                boxShadow: "var(--shadow-card)",
-              }}
-            >
-              <h3
-                className="text-base font-semibold mb-3"
-                style={{ color: "var(--color-text-primary)" }}
-              >
-                操作
-              </h3>
-              <div className="space-y-3">
-                <div className="flex items-center justify-between">
-                  <div>
-                    <p className="text-sm" style={{ color: "var(--color-text-secondary)" }}>
-                      重放待处理事件
-                    </p>
-                    <p className="text-xs" style={{ color: "var(--color-text-tertiary)" }}>
-                      重新处理所有 pending 状态的记忆事件
-                    </p>
-                  </div>
-                  <button
-                    onClick={handleReplay}
-                    disabled={replaying}
-                    className="btn h-9 px-4 text-sm"
-                  >
-                    {replaying ? "处理中..." : "执行重放"}
-                  </button>
-                </div>
-
-                <div
-                  className="flex items-center justify-between pt-3 border-t"
-                  style={{ borderColor: "var(--color-border-default)" }}
-                >
-                  <div>
-                    <p className="text-sm" style={{ color: "var(--color-text-secondary)" }}>
-                      扫描记忆库
-                    </p>
-                    <p className="text-xs" style={{ color: "var(--color-text-tertiary)" }}>
-                      立即检查记忆库 Markdown 与工具会话目录，未变更的自动跳过（零 LLM 成本）
-                    </p>
-                  </div>
-                  <button
-                    onClick={handleScan}
-                    disabled={scanning || importing || rebuilding}
-                    className="btn h-9 px-4 text-sm"
-                  >
-                    {scanning ? "扫描中..." : "立即扫描"}
-                  </button>
-                </div>
-
-                <div
-                  className="flex items-center justify-between pt-3 border-t"
-                  style={{ borderColor: "var(--color-border-default)" }}
-                >
-                  <div>
-                    <p className="text-sm" style={{ color: "var(--color-text-secondary)" }}>
-                      重建采集卡片
-                    </p>
-                    <p className="text-xs" style={{ color: "var(--color-text-tertiary)" }}>
-                      删除所有文件采集的旧卡片并重扫，按话题拆分重新生成中文卡片（对话/手动记忆不受影响）
-                    </p>
-                  </div>
-                  <button
-                    onClick={handleRebuild}
-                    disabled={scanning || importing || rebuilding}
-                    className="btn h-9 px-4 text-sm"
-                  >
-                    {rebuilding ? "重建中..." : "重建"}
-                  </button>
-                </div>
-
-                <div
-                  className="flex items-center justify-between pt-3 border-t"
-                  style={{ borderColor: "var(--color-border-default)" }}
-                >
-                  <div>
-                    <p className="text-sm" style={{ color: "var(--color-text-secondary)" }}>
-                      导入本地消息记录
-                    </p>
-                    <p className="text-xs" style={{ color: "var(--color-text-tertiary)" }}>
-                      支持 .md / .markdown / .txt / .jsonl（单文件 ≤5MB），jsonl 自动转换为可读格式
-                    </p>
-                  </div>
-                  <button
-                    onClick={() => fileInputRef.current?.click()}
-                    disabled={scanning || importing || rebuilding}
-                    className="btn btn-secondary h-9 px-4 text-sm"
-                  >
-                    {importing ? "导入中..." : "选择文件"}
-                  </button>
-                </div>
-
-                <input
-                  ref={fileInputRef}
-                  type="file"
-                  multiple
-                  accept=".md,.markdown,.txt,.jsonl"
-                  className="hidden"
-                  onChange={(e) => handleImport(e.target.files)}
-                />
-
-                {importMessage && (
-                  <p
-                    className="text-xs whitespace-pre-wrap rounded-lg p-3"
-                    style={{
-                      background: "var(--color-bg-secondary)",
-                      color: "var(--color-text-secondary)",
-                    }}
-                  >
-                    {importMessage}
-                  </p>
-                )}
-              </div>
-            </div>
-          </div>
-        )}
-
-        {activeTab === "conflicts" && (
-          <div>
-            {conflicts.length === 0 ? (
-              <div className="py-16 text-center" style={{ color: "var(--color-text-tertiary)" }}>
-                暂无待解决的冲突
-              </div>
-            ) : (
-              <div className="space-y-4">
-                {conflicts.map((conflict) => (
-                  <div
-                    key={conflict.conflictId}
-                    className="bg-white border rounded-xl p-5"
-                    style={{
-                      borderColor: "var(--color-border-default)",
-                      boxShadow: "var(--shadow-card)",
-                    }}
-                  >
-                    <div className="flex items-center justify-between mb-3">
-                      <div className="flex items-center gap-2">
-                        <span
-                          className="text-xs font-mono"
-                          style={{ color: "var(--color-text-tertiary)" }}
-                        >
-                          {conflict.conflictId.slice(0, 12)}...
-                        </span>
-                        <span className="tag">字段: {conflict.field}</span>
-                        <span className="tag">{conflict.status}</span>
+                  <header className="flex flex-col gap-3 border-b border-border bg-muted/60 px-4 py-4 sm:flex-row sm:items-start sm:justify-between sm:px-5">
+                    <div className="min-w-0">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <span className="status-tag status-tag--pending">待人工审核</span>
+                        <code className="text-xs text-text-tertiary">{review.reasonCode}</code>
                       </div>
-                      <span className="text-xs" style={{ color: "var(--color-text-tertiary)" }}>
-                        {new Date(conflict.createdAt).toLocaleString("zh-CN")}
-                      </span>
+                      <h2 className="mt-2 break-words text-lg font-semibold text-text-primary">
+                        {review.candidate?.title || "候选内容无法解析"}
+                      </h2>
+                      <p className="mt-1 break-all font-mono text-xs text-text-tertiary">
+                        {review.sourceId || review.candidate?.source || review.eventId}
+                      </p>
                     </div>
-
-                    <div className="grid grid-cols-2 gap-4 mb-4">
-                      <div>
-                        <p
-                          className="text-xs font-medium mb-1"
-                          style={{ color: "var(--color-text-tertiary)" }}
-                        >
-                          现有值
-                        </p>
-                        <div
-                          className="rounded-lg p-3 text-sm font-mono whitespace-pre-wrap"
-                          style={{
-                            background: "var(--color-bg-secondary)",
-                            color: "var(--color-text-secondary)",
-                          }}
-                        >
-                          {conflict.existingValue}
-                        </div>
-                      </div>
-                      <div>
-                        <p
-                          className="text-xs font-medium mb-1"
-                          style={{ color: "var(--color-text-tertiary)" }}
-                        >
-                          候选值
-                        </p>
-                        <div
-                          className="rounded-lg p-3 text-sm font-mono whitespace-pre-wrap"
-                          style={{
-                            background: "var(--color-bg-secondary)",
-                            color: "var(--color-text-secondary)",
-                          }}
-                        >
-                          {conflict.candidateValue}
-                        </div>
-                      </div>
-                    </div>
-
-                    <label className="block mb-3">
-                      <span
-                        className="block text-xs font-medium mb-1"
-                        style={{ color: "var(--color-text-tertiary)" }}
-                      >
-                        手动编辑值（字符串可直接输入；数组或对象请使用 JSON）
-                      </span>
-                      <textarea
-                        value={manualValues[conflict.conflictId] ?? ""}
-                        onChange={(event) =>
-                          setManualValues((prev) => ({
-                            ...prev,
-                            [conflict.conflictId]: event.target.value,
-                          }))
-                        }
-                        rows={3}
-                        className="w-full bg-gray-50 rounded-lg p-3 text-sm font-mono border"
-                        style={{ borderColor: "var(--color-border-default)" }}
-                      />
-                    </label>
-
-                    <div
-                      className="flex gap-2 pt-3 border-t"
-                      style={{ borderColor: "var(--color-border-default)" }}
+                    <time
+                      className="shrink-0 text-xs text-text-tertiary"
+                      dateTime={review.createdAt}
                     >
-                      <button
-                        onClick={() => handleResolve(conflict.conflictId, "accept")}
-                        disabled={resolvingId === conflict.conflictId}
-                        className="btn h-8 px-4 text-xs"
-                      >
-                        接受候选值
-                      </button>
-                      <button
-                        onClick={() => handleResolve(conflict.conflictId, "keep")}
-                        disabled={resolvingId === conflict.conflictId}
-                        className="btn btn-secondary h-8 px-4 text-xs"
-                      >
-                        保留现有值
-                      </button>
-                      <button
-                        onClick={() => handleResolve(conflict.conflictId, "manual")}
-                        disabled={resolvingId === conflict.conflictId}
-                        className="btn btn-secondary h-8 px-4 text-xs"
-                      >
-                        应用手动值
-                      </button>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
-        )}
-
-        {activeTab === "review" && (
-          <div>
-            {reviewEvents.length === 0 ? (
-              <div className="py-16 text-center" style={{ color: "var(--color-text-tertiary)" }}>
-                暂无待人工裁决的事件
-              </div>
-            ) : (
-              <div className="space-y-4">
-                <p className="text-xs" style={{ color: "var(--color-text-tertiary)" }}>
-                  以下事件被质量闸门标记为需人工判断（评分 4-6 或降级）：
-                  「接受」将跳过闸门直接入库，「拒绝」为终态拒绝不再重试。
-                </p>
-                {reviewEvents.map((event) => (
-                  <div
-                    key={event.eventId}
-                    className="bg-white border rounded-xl p-5"
-                    style={{
-                      borderColor: "var(--color-border-default)",
-                      boxShadow: "var(--shadow-card)",
-                    }}
-                  >
-                    <div className="flex items-center justify-between mb-3">
-                      <div className="flex items-center gap-2">
-                        <span
-                          className="text-xs font-mono"
-                          style={{ color: "var(--color-text-tertiary)" }}
-                        >
-                          {event.eventId.slice(0, 12)}...
-                        </span>
-                        <span className="tag">{event.sourceType}</span>
-                        <span className="tag">重试 {event.retryCount} 次</span>
-                      </div>
-                      <span className="text-xs" style={{ color: "var(--color-text-tertiary)" }}>
-                        {new Date(event.createdAt).toLocaleString("zh-CN")}
-                      </span>
-                    </div>
-
-                    {event.candidate ? (
-                      <div className="mb-4">
-                        <p
-                          className="text-sm font-medium mb-1"
-                          style={{ color: "var(--color-text-primary)" }}
-                        >
-                          {event.candidate.title}
-                        </p>
-                        {event.candidate.summary && (
-                          <p
-                            className="text-xs mb-2"
-                            style={{ color: "var(--color-text-tertiary)" }}
-                          >
-                            {event.candidate.summary}
+                      {new Date(review.createdAt).toLocaleString("zh-CN")}
+                    </time>
+                  </header>
+                  <div className="grid min-w-0 lg:grid-cols-2">
+                    <section className="min-w-0 border-b border-border p-4 sm:p-5 lg:border-b-0 lg:border-r">
+                      <p className="mb-2 text-xs font-semibold uppercase text-text-tertiary">
+                        来源摘录
+                      </p>
+                      <blockquote className="max-h-72 overflow-y-auto whitespace-pre-wrap break-words border-l-2 border-accent-line pl-4 text-sm leading-6 text-text-secondary">
+                        {review.candidate?.evidence?.text || "该候选没有附带来源摘录。"}
+                      </blockquote>
+                      <dl className="mt-4 grid gap-2 text-xs">
+                        <Meta
+                          label="位置"
+                          value={
+                            review.candidate?.evidence?.location ||
+                            review.candidate?.source ||
+                            "未提供"
+                          }
+                        />
+                        <Meta label="来源版本" value={review.sourceRevision || "旧事件未记录"} />
+                      </dl>
+                    </section>
+                    <section className="min-w-0 p-4 sm:p-5">
+                      <p className="mb-2 text-xs font-semibold uppercase text-text-tertiary">
+                        候选知识
+                      </p>
+                      {editingId === review.eventId && candidate ? (
+                        <CandidateEditor value={candidate} onChange={setDraft} />
+                      ) : candidate ? (
+                        <>
+                          <p className="font-semibold text-text-primary">{candidate.title}</p>
+                          <p className="mt-2 text-sm leading-6 text-text-secondary">
+                            {candidate.summary}
                           </p>
-                        )}
-                        <div
-                          className="rounded-lg p-3 text-sm whitespace-pre-wrap"
-                          style={{
-                            background: "var(--color-bg-secondary)",
-                            color: "var(--color-text-secondary)",
-                          }}
-                        >
-                          {event.candidate.contentPreview}
-                        </div>
-                        {event.candidate.tags.length > 0 && (
-                          <div className="flex flex-wrap gap-1 mt-2">
-                            {event.candidate.tags.map((tag) => (
+                          <div className="mt-4 max-h-48 overflow-y-auto whitespace-pre-wrap break-words border-t border-border pt-4 text-sm text-text-secondary">
+                            {candidate.content}
+                          </div>
+                          <div className="mt-4 flex flex-wrap gap-1.5">
+                            {candidate.tags.map((tag) => (
                               <span key={tag} className="tag">
                                 #{tag}
                               </span>
                             ))}
                           </div>
-                        )}
-                      </div>
-                    ) : (
-                      <p className="text-xs mb-4" style={{ color: "var(--color-text-tertiary)" }}>
-                        候选内容已损坏，无法预览
-                      </p>
-                    )}
-
-                    <div
-                      className="flex gap-2 pt-3 border-t"
-                      style={{ borderColor: "var(--color-border-default)" }}
-                    >
-                      <button
-                        onClick={() => handleReviewDecision(event.eventId, "accept")}
-                        disabled={resolvingId === event.eventId}
-                        className="btn h-8 px-4 text-xs"
-                      >
-                        接受入库
-                      </button>
-                      <button
-                        onClick={() => handleReviewDecision(event.eventId, "reject")}
-                        disabled={resolvingId === event.eventId}
-                        className="btn btn-secondary h-8 px-4 text-xs"
-                      >
-                        拒绝
-                      </button>
-                    </div>
+                        </>
+                      ) : (
+                        <p className="text-sm text-error">候选数据损坏，建议拒绝并重新采集。</p>
+                      )}
+                    </section>
                   </div>
-                ))}
-              </div>
-            )}
+                  <footer className="flex flex-col gap-4 border-t border-border px-4 py-4 sm:flex-row sm:items-center sm:justify-between sm:px-5">
+                    <p className="max-w-2xl text-sm text-text-secondary">
+                      <strong className="text-text-primary">判断原因：</strong>
+                      {review.reason}
+                    </p>
+                    <div className="flex shrink-0 flex-wrap gap-2">
+                      {editingId === review.eventId ? (
+                        <>
+                          <button
+                            type="button"
+                            className="btn-secondary"
+                            onClick={() => {
+                              setEditingId(null);
+                              setDraft(null);
+                            }}
+                          >
+                            取消
+                          </button>
+                          <button
+                            type="button"
+                            className="btn"
+                            disabled={!draft || workingId === review.eventId}
+                            onClick={() => draft && void decideReview(review, "accept", draft)}
+                          >
+                            保存并接受
+                          </button>
+                        </>
+                      ) : (
+                        <>
+                          <button
+                            type="button"
+                            className="btn-ghost text-error"
+                            disabled={workingId === review.eventId}
+                            onClick={() => void decideReview(review, "reject")}
+                          >
+                            拒绝
+                          </button>
+                          <button
+                            type="button"
+                            className="btn-secondary"
+                            disabled={!review.candidate || workingId === review.eventId}
+                            onClick={() => {
+                              setEditingId(review.eventId);
+                              setDraft(review.candidate);
+                            }}
+                          >
+                            编辑
+                          </button>
+                          <button
+                            type="button"
+                            className="btn"
+                            disabled={!review.candidate || workingId === review.eventId}
+                            onClick={() => void decideReview(review, "accept")}
+                          >
+                            接受候选
+                          </button>
+                        </>
+                      )}
+                    </div>
+                  </footer>
+                </article>
+              );
+            })}
           </div>
-        )}
+        )
+      ) : null}
+
+      {!loading && activeTab === "conflicts" ? (
+        conflicts.length === 0 ? (
+          <EmptyLine>没有待处理的字段冲突。</EmptyLine>
+        ) : (
+          <div className="space-y-5">
+            {conflicts.map((conflict) => (
+              <article
+                key={conflict.conflictId}
+                className="rounded-lg border border-border bg-surface p-4 sm:p-5"
+              >
+                <div className="flex flex-wrap items-center justify-between gap-3">
+                  <h2 className="font-semibold text-text-primary">字段：{conflict.field}</h2>
+                  <code className="text-xs text-text-tertiary">{conflict.memoryId}</code>
+                </div>
+                <div className="mt-4 grid gap-3 md:grid-cols-2">
+                  <CompareValue label="现有内容" value={conflict.existingValue} />
+                  <CompareValue label="候选内容" value={conflict.candidateValue} />
+                </div>
+                <label
+                  className="mt-4 block text-xs font-medium text-text-secondary"
+                  htmlFor={`manual-${conflict.conflictId}`}
+                >
+                  手动合并值
+                </label>
+                <textarea
+                  id={`manual-${conflict.conflictId}`}
+                  className="input mt-1 min-h-24 resize-y"
+                  value={manualValues[conflict.conflictId] || ""}
+                  onChange={(event) =>
+                    setManualValues((values) => ({
+                      ...values,
+                      [conflict.conflictId]: event.target.value,
+                    }))
+                  }
+                />
+                <div className="mt-4 flex flex-wrap justify-end gap-2">
+                  <button
+                    type="button"
+                    className="btn-secondary"
+                    onClick={() => void resolveConflict(conflict, "keep")}
+                  >
+                    保留现有
+                  </button>
+                  <button
+                    type="button"
+                    className="btn-secondary"
+                    onClick={() => void resolveConflict(conflict, "manual")}
+                    disabled={!manualValues[conflict.conflictId]?.trim()}
+                  >
+                    使用合并值
+                  </button>
+                  <button
+                    type="button"
+                    className="btn"
+                    onClick={() => void resolveConflict(conflict, "accept")}
+                  >
+                    接受候选
+                  </button>
+                </div>
+              </article>
+            ))}
+          </div>
+        )
+      ) : null}
+
+      {!loading && activeTab === "report" ? (
+        <section className="grid gap-px overflow-hidden rounded-lg border border-border bg-border sm:grid-cols-3">
+          {[
+            ["已发布知识", report?.totalMemories ?? 0],
+            ["待处理事件", report?.pendingEvents ?? 0],
+            ["待裁决冲突", report?.conflicts ?? 0],
+          ].map(([label, value]) => (
+            <div key={label} className="bg-surface p-6">
+              <p className="text-sm text-text-secondary">{label}</p>
+              <p className="mt-2 font-mono text-3xl font-bold text-text-primary">{value}</p>
+            </div>
+          ))}
+        </section>
+      ) : null}
+    </div>
+  );
+}
+
+function CandidateEditor({
+  value,
+  onChange,
+}: {
+  value: ReviewCandidate;
+  onChange: (value: ReviewCandidate) => void;
+}) {
+  return (
+    <div className="space-y-3">
+      <Field label="标题">
+        <input
+          className="input"
+          value={value.title}
+          onChange={(event) => onChange({ ...value, title: event.target.value })}
+        />
+      </Field>
+      <Field label="摘要">
+        <textarea
+          className="input min-h-20 resize-y"
+          value={value.summary}
+          onChange={(event) => onChange({ ...value, summary: event.target.value })}
+        />
+      </Field>
+      <Field label="正文">
+        <textarea
+          className="input min-h-48 resize-y font-mono text-sm"
+          value={value.content}
+          onChange={(event) => onChange({ ...value, content: event.target.value })}
+        />
+      </Field>
+      <div className="grid gap-3 sm:grid-cols-2">
+        <Field label="主题">
+          <input
+            className="input"
+            value={value.topic}
+            onChange={(event) => onChange({ ...value, topic: event.target.value })}
+          />
+        </Field>
+        <Field label="标签（逗号分隔）">
+          <input
+            className="input"
+            value={value.tags.join(", ")}
+            onChange={(event) =>
+              onChange({
+                ...value,
+                tags: event.target.value
+                  .split(/[,，]/)
+                  .map((tag) => tag.trim())
+                  .filter(Boolean),
+              })
+            }
+          />
+        </Field>
       </div>
+    </div>
+  );
+}
+function Field({ label, children }: { label: string; children: React.ReactNode }) {
+  return (
+    <label className="block text-xs font-medium text-text-secondary">
+      {label}
+      <span className="mt-1 block">{children}</span>
+    </label>
+  );
+}
+function Meta({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="grid min-w-0 grid-cols-[72px_1fr] gap-2">
+      <dt className="text-text-tertiary">{label}</dt>
+      <dd className="break-all font-mono text-text-secondary">{value}</dd>
+    </div>
+  );
+}
+function CompareValue({ label, value }: { label: string; value: string }) {
+  return (
+    <section className="min-w-0 border border-border bg-muted/50 p-3">
+      <p className="mb-2 text-xs font-semibold text-text-tertiary">{label}</p>
+      <pre className="max-h-56 overflow-auto whitespace-pre-wrap break-words font-sans text-sm text-text-secondary">
+        {value}
+      </pre>
+    </section>
+  );
+}
+function EmptyLine({ children }: { children: React.ReactNode }) {
+  return (
+    <div className="border-y border-border py-16 text-center text-sm text-text-tertiary">
+      {children}
     </div>
   );
 }

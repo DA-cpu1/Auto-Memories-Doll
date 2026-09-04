@@ -4,6 +4,8 @@ import { getActiveSources } from "../../../../../server/watchers/tool-dir-watche
 import { getFileWatcherStatus } from "../../../../../server/watchers/file-watcher";
 import { MemoryService } from "../../../../../server/services/memory-service";
 
+export const dynamic = "force-dynamic";
+
 /**
  * GET /api/config/tool-sources/status
  * 监听运行状态：文件监听器、工具监听器（配置数/活跃数）+ 各状态事件计数。

@@ -14,18 +14,29 @@ export async function GET() {
       } catch {
         // candidate 损坏时仍返回事件骨架
       }
+      const progress = event.sourceEventId
+        ? agent.listProgress({ eventId: event.sourceEventId }).at(-1)
+        : undefined;
       return {
         eventId: event.eventId,
         memoryId: event.memoryId,
         sourceType: event.sourceType,
         createdAt: event.createdAt,
         retryCount: event.retryCount,
+        sourceId: event.sourceId,
+        sourceRevision: event.sourceRevision,
+        reasonCode: progress?.errorCode ?? "manual_review",
+        reason: progress?.error ?? "质量闸门要求人工确认",
         candidate: candidate
           ? {
               title: candidate.title,
               summary: candidate.summary,
-              contentPreview: candidate.content.slice(0, 500),
+              content: candidate.content,
               tags: candidate.tags,
+              topic: candidate.topic,
+              kind: candidate.kind ?? "fact",
+              evidence: candidate.evidence,
+              source: candidate.source,
             }
           : null,
       };
@@ -40,6 +51,16 @@ export async function GET() {
 const reviewDecisionSchema = z.object({
   eventId: z.string().min(1),
   action: z.enum(["accept", "reject"]),
+  candidate: z
+    .object({
+      title: z.string().trim().min(1).max(240),
+      summary: z.string().trim().min(1).max(2000),
+      content: z.string().trim().min(1),
+      tags: z.array(z.string().trim().min(1).max(80)).max(30),
+      topic: z.string().trim().min(1).max(128),
+    })
+    .strict()
+    .optional(),
 });
 
 /** POST：人工裁决 —— accept 跳过闸门落盘；reject 终态拒绝 */
@@ -58,6 +79,9 @@ export async function POST(request: NextRequest) {
 
   const agent = new KnowledgeAgent();
   try {
+    if (parsed.data.action === "accept" && parsed.data.candidate) {
+      agent.updateReviewCandidate(parsed.data.eventId, parsed.data.candidate);
+    }
     const event = await agent.resolveReviewEvent(parsed.data.eventId, parsed.data.action);
     return NextResponse.json({ success: true, status: event.status });
   } catch (error) {

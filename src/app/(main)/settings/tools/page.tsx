@@ -35,6 +35,8 @@ export default function ToolSourcesPage() {
   const [sources, setSources] = useState<ToolWatchSource[]>([]);
   const [presets, setPresets] = useState<Record<string, Preset>>({});
   const [status, setStatus] = useState<WatchStatus | null>(null);
+  const [scanning, setScanning] = useState(false);
+  const [scanMessage, setScanMessage] = useState("");
 
   const refresh = useCallback(() => {
     fetch(`${API_BASE}/tool-sources`)
@@ -51,13 +53,53 @@ export default function ToolSourcesPage() {
   }, []);
 
   useEffect(() => {
-    document.title = "工具监听 | Auto-Memeries-Doll";
+    document.title = "来源设置 | Auto-Memories-Doll";
     refresh();
   }, [refresh]);
 
+  const scanSources = async () => {
+    setScanning(true);
+    setScanMessage("");
+    try {
+      const response = await fetch("/api/listen/scan", { method: "POST" });
+      const payload = await response.json();
+      setScanMessage(payload.message || (response.ok ? "扫描完成" : "扫描失败"));
+      refresh();
+    } catch {
+      setScanMessage("扫描失败，请检查服务状态");
+    } finally {
+      setScanning(false);
+    }
+  };
+
   return (
-    <div className="p-6 md:p-10 max-w-3xl mx-auto space-y-6">
-      <div className="card p-6">
+    <div className="mx-auto max-w-4xl space-y-6 p-4 py-8 sm:p-6 md:py-10">
+      <header className="flex flex-col gap-4 border-b border-border pb-6 sm:flex-row sm:items-end sm:justify-between">
+        <div>
+          <p className="mb-2 font-mono text-xs font-semibold uppercase text-text-tertiary">
+            Source registry
+          </p>
+          <h1 className="text-3xl font-bold text-text-primary">来源设置</h1>
+          <p className="mt-2 text-sm text-text-secondary">管理本地目录与开发工具会话的采集入口。</p>
+        </div>
+        <button
+          type="button"
+          className="btn self-start"
+          onClick={() => void scanSources()}
+          disabled={scanning}
+        >
+          {scanning ? "扫描中…" : "扫描所有来源"}
+        </button>
+      </header>
+      {scanMessage ? (
+        <p
+          role="status"
+          className="border-l-2 border-accent bg-accent-soft px-4 py-3 text-sm text-text-secondary"
+        >
+          {scanMessage}
+        </p>
+      ) : null}
+      <section className="rounded-lg border border-border bg-surface p-5 sm:p-6">
         <h2 className="text-lg font-semibold text-text-primary mb-1">运行状态</h2>
         <p className="text-xs text-text-tertiary mb-4">
           监听器与采集队列的实时情况（配置变更后自动刷新）
@@ -114,13 +156,15 @@ export default function ToolSourcesPage() {
             </div>
           </div>
         </div>
-      </div>
+      </section>
 
-      <div className="card p-6">
-        <h2 className="text-lg font-semibold text-text-primary mb-1">工具监听</h2>
-        <p className="text-xs text-text-tertiary mb-6">配置 IDE/AI 工具的工作目录监听源</p>
+      <section className="rounded-lg border border-border bg-surface p-5 sm:p-6">
+        <h2 className="text-lg font-semibold text-text-primary mb-1">监听源</h2>
+        <p className="text-xs text-text-tertiary mb-6">
+          新增、编辑、停用或移除来源；变更后监听器会自动重启。
+        </p>
         <ToolSourceList sources={sources} presets={presets} onChange={refresh} />
-      </div>
+      </section>
     </div>
   );
 }
