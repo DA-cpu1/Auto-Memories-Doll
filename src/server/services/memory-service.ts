@@ -8,6 +8,7 @@ import { getDatabase } from "../../lib/storage/database";
 import { withLock } from "../../lib/storage/lock";
 import { MemoryNotFoundError, MemoryValidationError } from "../../lib/errors";
 import { logger } from "../../lib/logger";
+import { assertPendingEventStatusTransition } from "../../features/agent/state-machine";
 import Database from "better-sqlite3";
 
 /** 安全 JSON 解析：损坏数据不崩溃，返回兜底值并记录日志 */
@@ -76,6 +77,9 @@ export class MemoryService {
       CREATE TABLE IF NOT EXISTS pending_events (
         eventId TEXT PRIMARY KEY,
         memoryId TEXT,
+        sourceEventId TEXT,
+        sourceId TEXT,
+        sourceRevision TEXT,
         sourceType TEXT,
         eventType TEXT,
         candidate TEXT,
@@ -85,11 +89,13 @@ export class MemoryService {
         retryCount INTEGER
       )
     `);
-    // 迁移：旧数据库的 pending_events 可能缺少 eventType 列
-    try {
-      this.db.exec(`ALTER TABLE pending_events ADD COLUMN eventType TEXT`);
-    } catch {
-      // 列已存在，跳过
+    // 迁移：旧数据库的 pending_events 可能缺少来源版本关联列。
+    for (const column of ["eventType", "sourceEventId", "sourceId", "sourceRevision"]) {
+      try {
+        this.db.exec(`ALTER TABLE pending_events ADD COLUMN ${column} TEXT`);
+      } catch {
+        // 列已存在，跳过
+      }
     }
     this.db.exec(`
       CREATE TABLE IF NOT EXISTS conflict_records (
@@ -231,7 +237,10 @@ export class MemoryService {
   }
 
   /** 将带稳定 ID 的完整候选记录作为 create 事件入队。 */
-  stageCreateMemoryRecord(memory: MemoryRecord): string {
+  stageCreateMemoryRecord(
+    memory: MemoryRecord,
+    sourceRevision?: { sourceEventId: string; sourceId: string; revision: string },
+  ): string {
     if (!validateMemoryRecord(memory)) {
       throw new MemoryValidationError("record", "记忆数据不完整");
     }
@@ -242,6 +251,7 @@ export class MemoryService {
       memory,
       Object.keys(memory) as string[],
       "create",
+      sourceRevision,
     );
     this.enqueueEvent(event);
     return memory.id;
@@ -250,7 +260,11 @@ export class MemoryService {
   /**
    * 外部入口统一使用：生成待更新记忆的 PendingEvent 并入队。
    */
-  stageUpdateMemory(id: string, updates: Partial<MemoryRecord>): string {
+  stageUpdateMemory(
+    id: string,
+    updates: Partial<MemoryRecord>,
+    sourceRevision?: { sourceEventId: string; sourceId: string; revision: string },
+  ): string {
     const existing = this.getMemory(id);
     if (!existing) throw new MemoryNotFoundError(id);
 
@@ -264,7 +278,14 @@ export class MemoryService {
       changedFields.push("updatedAt");
     }
 
-    const event = buildPendingEvent(id, candidate.sourceType, candidate, changedFields, "update");
+    const event = buildPendingEvent(
+      id,
+      candidate.sourceType,
+      candidate,
+      changedFields,
+      "update",
+      sourceRevision,
+    );
     this.enqueueEvent(event);
     return event.eventId;
   }
@@ -273,11 +294,21 @@ export class MemoryService {
    * 外部入口统一使用：生成待删除记忆的 PendingEvent 并入队。
    * 实际删除由 Orchestrator 在消费队列时完成，保证删除操作同样经过审计队列。
    */
-  stageDeleteMemory(memoryId: string): string {
+  stageDeleteMemory(
+    memoryId: string,
+    sourceRevision?: { sourceEventId: string; sourceId: string; revision: string },
+  ): string {
     const existing = this.getMemory(memoryId);
     if (!existing) throw new MemoryNotFoundError(memoryId);
 
-    const event = buildPendingEvent(memoryId, existing.sourceType, existing, [], "delete");
+    const event = buildPendingEvent(
+      memoryId,
+      existing.sourceType,
+      existing,
+      [],
+      "delete",
+      sourceRevision,
+    );
     this.enqueueEvent(event);
     return event.eventId;
   }
@@ -498,12 +529,16 @@ export class MemoryService {
   enqueueEvent(event: PendingEvent): void {
     const stmt = this.db.prepare(`
       INSERT INTO pending_events (
-        eventId, memoryId, sourceType, eventType, candidate, changedFields, createdAt, status, retryCount
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        eventId, memoryId, sourceEventId, sourceId, sourceRevision,
+        sourceType, eventType, candidate, changedFields, createdAt, status, retryCount
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `);
     stmt.run(
       event.eventId,
       event.memoryId,
+      event.sourceEventId ?? null,
+      event.sourceId ?? null,
+      event.sourceRevision ?? null,
       event.sourceType,
       event.eventType || null,
       event.candidate,
@@ -535,6 +570,9 @@ export class MemoryService {
       return {
         eventId: row.eventId,
         memoryId: row.memoryId,
+        sourceEventId: row.sourceEventId || undefined,
+        sourceId: row.sourceId || undefined,
+        sourceRevision: row.sourceRevision || undefined,
         sourceType: row.sourceType as PendingEvent["sourceType"],
         eventType: (row.eventType || undefined) as PendingEvent["eventType"],
         candidate: row.candidate,
@@ -572,6 +610,9 @@ export class MemoryService {
       return {
         eventId: row.eventId,
         memoryId: row.memoryId,
+        sourceEventId: row.sourceEventId || undefined,
+        sourceId: row.sourceId || undefined,
+        sourceRevision: row.sourceRevision || undefined,
         sourceType: row.sourceType as PendingEvent["sourceType"],
         eventType: (row.eventType || undefined) as PendingEvent["eventType"],
         candidate: row.candidate,
@@ -590,6 +631,11 @@ export class MemoryService {
   }
 
   updateEvent(event: PendingEvent): void {
+    const current = this.db
+      .prepare("SELECT status FROM pending_events WHERE eventId = ?")
+      .get(event.eventId) as { status: PendingEvent["status"] } | undefined;
+    if (!current) return;
+    assertPendingEventStatusTransition(current.status, event.status);
     const stmt = this.db.prepare(`
       UPDATE pending_events SET status = ?, retryCount = ? WHERE eventId = ?
     `);
@@ -615,6 +661,9 @@ export class MemoryService {
     return rows.map((row) => ({
       eventId: row.eventId,
       memoryId: row.memoryId,
+      sourceEventId: row.sourceEventId || undefined,
+      sourceId: row.sourceId || undefined,
+      sourceRevision: row.sourceRevision || undefined,
       sourceType: row.sourceType as PendingEvent["sourceType"],
       eventType: (row.eventType || undefined) as PendingEvent["eventType"],
       candidate: row.candidate,
@@ -689,6 +738,9 @@ export class MemoryService {
     return {
       eventId: row.eventId,
       memoryId: row.memoryId,
+      sourceEventId: row.sourceEventId || undefined,
+      sourceId: row.sourceId || undefined,
+      sourceRevision: row.sourceRevision || undefined,
       sourceType: row.sourceType as PendingEvent["sourceType"],
       eventType: (row.eventType || undefined) as PendingEvent["eventType"],
       candidate: row.candidate,
@@ -716,6 +768,9 @@ export class MemoryService {
     return rows.map((row) => ({
       eventId: row.eventId,
       memoryId: row.memoryId,
+      sourceEventId: row.sourceEventId || undefined,
+      sourceId: row.sourceId || undefined,
+      sourceRevision: row.sourceRevision || undefined,
       sourceType: row.sourceType as PendingEvent["sourceType"],
       eventType: (row.eventType || undefined) as PendingEvent["eventType"],
       candidate: row.candidate,
@@ -728,6 +783,17 @@ export class MemoryService {
       status: row.status as PendingEvent["status"],
       retryCount: row.retryCount,
     }));
+  }
+
+  cancelUnpublishedSourceEvents(sourceId: string): string[] {
+    const events = [
+      ...this.getEventsByStatus("pending"),
+      ...this.getEventsByStatus("review"),
+    ].filter((event) => event.sourceId === sourceId);
+    for (const event of events) {
+      this.updateEvent({ ...event, status: "rejected" });
+    }
+    return [...new Set(events.map((event) => event.memoryId))];
   }
 
   /**

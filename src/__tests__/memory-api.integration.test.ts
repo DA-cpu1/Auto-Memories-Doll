@@ -16,7 +16,7 @@ const vectorRetrieverMock = vi.hoisted(() => ({
   close: vi.fn(),
 }));
 
-const orchestratorMock = vi.hoisted(() => ({
+const knowledgeAgentMock = vi.hoisted(() => ({
   processIngest: vi.fn(),
   close: vi.fn(),
 }));
@@ -29,8 +29,8 @@ vi.mock("../lib/vector/retriever", () => ({
   VectorRetriever: vi.fn(() => vectorRetrieverMock),
 }));
 
-vi.mock("../server/services/orchestrator", () => ({
-  Orchestrator: vi.fn(() => orchestratorMock),
+vi.mock("../server/services/knowledge-agent", () => ({
+  KnowledgeAgent: vi.fn(() => knowledgeAgentMock),
 }));
 
 import { GET as listMemories } from "../app/api/memory/route";
@@ -80,7 +80,7 @@ describe("memory list/search/ingest HTTP contracts", () => {
       results: [{ memoryId: memory.id, similarity: 0.92 }],
       mode: "vector",
     });
-    orchestratorMock.processIngest.mockResolvedValue("event-1");
+    knowledgeAgentMock.processIngest.mockResolvedValue("event-1");
   });
 
   it("GET /api/memory exposes the list under data.items", async () => {

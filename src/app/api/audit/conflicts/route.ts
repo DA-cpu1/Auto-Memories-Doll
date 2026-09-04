@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { AuditReviewer } from "../../../../features/audit/reviewer";
-import { Orchestrator } from "../../../../server/services/orchestrator";
+import { KnowledgeAgent } from "../../../../server/services/knowledge-agent";
 
 const conflictResolveSchema = z
   .object({
@@ -45,10 +45,10 @@ export async function POST(request: NextRequest) {
   }
 
   const { conflictId, resolution, manualValue, mergedContent } = parsed.data;
-  const orchestrator = new Orchestrator();
+  const agent = new KnowledgeAgent();
 
   try {
-    const memory = await orchestrator.resolveConflict(
+    const memory = await agent.resolveConflict(
       conflictId,
       resolution,
       manualValue ?? mergedContent,
@@ -57,6 +57,6 @@ export async function POST(request: NextRequest) {
   } catch (error) {
     return NextResponse.json({ error: (error as Error).message }, { status: 400 });
   } finally {
-    orchestrator.close();
+    agent.close();
   }
 }

@@ -5,7 +5,8 @@
 | 概念 | 一句话 | 位置 |
 |------|--------|------|
 | **记忆 (Memory)** | Markdown 文件承载的独立知识单元，含 YAML 元数据，人类和 LLM 均可直读 | `memory-root/notes/` |
-| **Agent 循环** | 用户消息 → 记忆检索 → 组装提示 → AI 流式响应 → 工具调用 → 候选记忆写入待审计队列 | `src/features/chat/handler.ts` |
+| **KnowledgeAgent 循环** | 来源版本 → 解析/归一化 → 候选入队 → 质量评价 → 发布/审核/恢复 | `src/server/services/knowledge-agent.ts` |
+| **旧聊天循环** | 用户消息 → 记忆检索 → AI 流式响应 → 工具调用；属于 LKA-001 待删除范围 | `src/features/chat/handler.ts` |
 | **待审计队列** | 候选记忆写回前暂存的 SQLite 队列，按 `memoryId` 串行消费 | `src/server/services/memory-service.ts` |
 | **LLMWiki** | Markdown + YAML frontmatter 格式，每条记忆自包含 | `src/lib/storage/markdown-formatter.ts` |
 | **向量召回** | SQLite 保存向量真源 + USearch HNSW ANN；版本失配自动重建，JS 精确扫描仅作降级 | `src/lib/vector/retriever.ts` / `src/lib/vector/backend.ts` |
@@ -840,7 +841,7 @@ export type ConflictRecord = {
 | 更新路径绕过质量闸门 | 旧实现仅新建记忆过质量闸门，update 事件 content 变更直接进审计 | 已修复：`Orchestrator` 更新分支在 `changedFields` 含 `content` 时同样执行向量去重 + 质量闸门（reject → rejected；review → warn 后继续审计 diff/冲突兜底） | ~~P1~~ |
 | 多入口写入无语义去重 | 旧实现仅 ingest 入口有 Jaccard 快筛，chat/listen/tool 等入口无语义去重 | 已修复：`Orchestrator` 统一入口向量语义去重（`VectorIndex.search` cosine ≥ 0.95 判重 → rejected）；一次 embedding 召回 top-K 相似记忆同时服务去重与闸门新颖性上下文（≥0.6 才注入 prompt，省 token） | ~~P1~~ |
 | review 无人工裁决出口 | 无 | 已修复：`Orchestrator.resolveReviewEvent(eventId, action)`（accept 跳闸门直接落盘，避免重新入队死循环；reject 终拒归档）+ `GET/POST /api/audit/review-events` 路由 + API 契约登记 | ~~P2~~ |
-| 产品范围与 LKA-001 目标不一致 | `docs/specs/001-local-knowledge-agent/` 将产品收缩为本地知识整理 Agent，并明确删除聊天、画像、人格 Prompt 和聊天型 MCP/Skills | Phase 1 已完成保留链路特征测试，范围外功能仍存在；必须在 Phase 4 解耦完成后，按 LKA-001 Phase 5 删除 | P0 |
+| 产品范围与 LKA-001 目标不一致 | `docs/specs/001-local-knowledge-agent/` 将产品收缩为本地知识整理 Agent，并明确删除聊天、画像、人格 Prompt 和聊天型 MCP/Skills | Phase 2 已完成显式 `KnowledgeAgent`、统一来源版本和状态契约，范围外功能仍存在；必须在 Phase 4 解耦完成后，按 LKA-001 Phase 5 删除 | P0 |
 
 ### 11.2 渐进式路线图
 
@@ -912,7 +913,7 @@ Phase 5 — 检索与质量收口 [DONE]
 
 ### 11.3 LKA-001 功能收缩路线图
 
-详细规范位于 `docs/specs/001-local-knowledge-agent/`，当前阶段：**Phase 2 显式 KnowledgeAgent 契约**。
+详细规范位于 `docs/specs/001-local-knowledge-agent/`，当前阶段：**Phase 3 去噪和来源追踪**。
 
 ```text
 Phase 0 — 确认范围和建立基线 [DONE]
@@ -927,8 +928,14 @@ Phase 1 — 固定保留行为 [DONE]
   [x] 关键词/向量/多路/图谱/MMR 检索测试
   [x] HNSW sidecar 重建不修改规范 Markdown 测试
 
-Phase 2 — 显式 KnowledgeAgent 契约 [NEXT]
-Phase 3 — 去噪和来源追踪
+Phase 2 — 显式 KnowledgeAgent 契约 [DONE]
+  [x] SourceRevisionEvent TypeScript + Zod 契约与稳定来源/版本/事件 ID
+  [x] SourceRegistry 持久化来源版本和健康状态
+  [x] 文件、工具目录和 listen 统一输出来源版本事件
+  [x] Agent 与 pending_events 集中状态迁移保护及中断恢复
+  [x] 生产入口统一经 KnowledgeAgent，Orchestrator 降为内部兼容执行器
+  [x] processing_attempts 类型化进度、结构化日志和状态查询
+Phase 3 — 去噪和来源追踪 [NEXT]
 Phase 4 — 保留代码解耦
 Phase 5 — 删除范围外功能
 Phase 6 — 主题学习资料生成
@@ -940,6 +947,7 @@ Phase 8 — 验证和作品集交付
 
 - LKA-001 Phase 0 已完成：规范确认、Git 基线、代码规模报告、移动端 hydration 竞争修复、图谱 E2E 更新和全门禁验证；详细结果见 `docs/specs/001-local-knowledge-agent/phase-0-baseline.md`
 - LKA-001 Phase 1 已完成：新增 13 条真实存储特征测试，并修复抽取卡覆盖原始 `sourceHash` 导致未变化文件重复入队的问题；详细结果见 `docs/specs/001-local-knowledge-agent/phase-1-characterization.md`
+- LKA-001 Phase 2 已完成：新增统一来源版本、`SourceRegistry`、集中状态机、显式 `KnowledgeAgent` 与持久化进度，生产入口不再直接实例化 `Orchestrator`；详细结果见 `docs/specs/001-local-knowledge-agent/phase-2-knowledge-agent.md`
 
 - 已完成 `ChatHandler` 系统提示拆分：`src/features/chat/system-prompt.ts`
 - 已完成审计报告写入拆分：`src/server/services/audit-report-writer.ts`

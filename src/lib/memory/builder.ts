@@ -49,10 +49,14 @@ export const buildPendingEvent = (
   candidate: MemoryRecord,
   changedFields: string[],
   eventType?: "create" | "update" | "delete",
+  sourceRevision?: { sourceEventId: string; sourceId: string; revision: string },
 ): PendingEvent => {
   return {
     eventId: generateId(),
     memoryId,
+    sourceEventId: sourceRevision?.sourceEventId,
+    sourceId: sourceRevision?.sourceId,
+    sourceRevision: sourceRevision?.revision,
     sourceType,
     eventType,
     candidate: JSON.stringify(candidate),

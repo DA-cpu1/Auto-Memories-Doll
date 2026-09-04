@@ -1,14 +1,9 @@
 import { watch, FSWatcher } from "chokidar";
 import { readFile, readdir } from "fs/promises";
-import { createHash } from "crypto";
 import { join, resolve } from "path";
-import { MemoryRecord } from "../../types/memory";
 import { getMemoryRoot } from "../../lib/storage/path-resolver";
-import { IngestAdapter } from "../../features/ingest/adapter";
-import { InputNormalizer } from "../../features/ingest/normalizer";
-import { InputParser } from "../../features/ingest/parser";
-import { MemoryService } from "../services/memory-service";
-import { parseMemoryFromText } from "../../lib/storage/markdown-parser";
+import { createSourceRevisionEvent } from "../../lib/source/source-revision";
+import { KnowledgeAgent } from "../services/knowledge-agent";
 import { isRecentWrite } from "../../lib/storage/write-tracker";
 import { logger } from "../../lib/logger";
 
@@ -52,6 +47,12 @@ export function startFileWatcher(): void {
     await ingestMarkdownFile(filePath, "change");
   });
 
+  watcher.on("unlink", async (filePath) => {
+    if (!filePath.endsWith(".md")) return;
+    if (filePath.endsWith("index-map.md") || filePath.endsWith("profile.md")) return;
+    await ingestMarkdownFile(filePath, "delete");
+  });
+
   watcher.on("error", (error) => {
     logger.ingest.error("[FileWatcher] 监听错误:", { error: (error as Error).message });
   });
@@ -77,7 +78,7 @@ export function getFileWatcherStatus(): { running: boolean; root: string } {
   return { running: globalStore.__amdFileWatcherRunning === true, root: getMemoryRoot() };
 }
 
-type MarkdownFileEvent = "add" | "change" | "scan";
+type MarkdownFileEvent = "add" | "change" | "delete" | "scan";
 
 /**
  * 立即重扫记忆库目录下所有 Markdown（绕过 chokidar 事件），供「扫描/重建」按钮调用。
@@ -102,34 +103,6 @@ export async function scanMemoryRoot(): Promise<number> {
     logger.ingest.error("[FileWatcher] 扫描记忆库失败:", { error: (error as Error).message });
   }
   return scanned;
-}
-
-/**
- * 将文件路径映射为稳定 ID，供没有 frontmatter 的外部 Markdown 使用。
- * 同一路径的 add/change 始终落到同一个 memoryId，避免每次修改都新建记忆。
- */
-function getStableFileMemoryId(filePath: string): string {
-  const resolvedPath = resolve(filePath).replace(/\\/g, "/");
-  return `file-${createHash("sha256").update(resolvedPath).digest("hex").slice(0, 32)}`;
-}
-
-function getFileUpdates(record: MemoryRecord, filePath: string): Partial<MemoryRecord> {
-  return {
-    source: record.source || filePath,
-    sourceType: record.sourceType,
-    title: record.title,
-    titleZh: record.titleZh,
-    content: record.content,
-    summary: record.summary,
-    summaryZh: record.summaryZh,
-    tags: record.tags,
-    tagsZh: record.tagsZh,
-    topic: record.topic,
-    topicZh: record.topicZh,
-    kind: record.kind,
-    evidence: record.evidence,
-    graphLinks: record.graphLinks,
-  };
 }
 
 /**
@@ -162,90 +135,30 @@ async function ingestMarkdownFileOnce(
     // 跳过本进程最近写入的文件，防止 Markdown 写回 → 监听 → 再次入队的循环
     if (isRecentWrite(filePath)) return;
 
-    const content = await readFile(filePath, "utf-8");
-    if (content.length < 10) return;
+    const content = eventType === "delete" ? "" : await readFile(filePath, "utf-8");
+    if (eventType !== "delete" && content.length < 10) return;
 
-    // 来源原文哈希：入库内容是中文重写卡后与原文不可字面比对，靠它判断文件是否变更
-    const contentHash = createHash("sha256").update(content).digest("hex");
-
-    const memoryService = new MemoryService();
-
+    const sourceEvent = createSourceRevisionEvent({
+      sourceType: "markdown",
+      sourcePath: filePath,
+      content: eventType === "delete" ? `deleted:${relativePath}` : content,
+      operation: eventType === "scan" ? "rescan" : eventType,
+    });
+    const agent = new KnowledgeAgent();
     try {
-      // 检测 LLMWiki frontmatter 格式
-      if (content.startsWith("---")) {
-        const record = parseMemoryFromText(content);
-        if (record) {
-          const stableRecord: MemoryRecord = {
-            ...record,
-            id: record.id || getStableFileMemoryId(filePath),
-            source: record.source || filePath,
-            evidence: {
-              text: record.evidence?.text ?? content.slice(0, 500),
-              location: record.evidence?.location ?? filePath,
-              sourceHash: contentHash,
-            },
-          };
-          const existing = memoryService.getMemory(stableRecord.id);
-
-          if (existing) {
-            // 内容未变更（scan/change 重扫）→ 零成本跳过
-            const unchanged = existing.evidence?.sourceHash
-              ? existing.evidence.sourceHash === contentHash
-              : existing.content === content;
-            if (unchanged) return;
-            // 有变更（或 add 时已存在）→ 统一走更新事件，由审计流程决定合并/冲突
-            memoryService.stageUpdateMemory(
-              stableRecord.id,
-              getFileUpdates(stableRecord, filePath),
-            );
-          } else {
-            memoryService.stageCreateMemoryRecord(stableRecord);
-          }
-
-          logger.ingest.info(
-            `[FileWatcher] 已入队 (${eventType}, LLMWiki): ${filePath} → ${stableRecord.id}`,
-          );
-          return;
-        }
-      }
-
-      // 回退：纯文本/无 frontmatter 格式
-      const parser = new InputParser();
-      const normalizer = new InputNormalizer();
-      const adapter = new IngestAdapter();
-
-      const events = [parser.parseText(content)];
-      const normalized = normalizer.normalize(events);
-      const records = adapter.adaptBatch(normalized);
-
-      for (const record of records) {
-        const stableRecord: MemoryRecord = {
-          ...record,
-          id: getStableFileMemoryId(filePath),
-          source: filePath,
-          // 纯文本文件的内容本身就是原文：补上证据链（含原文哈希），避免采集类入口被闸门强制转 review
-          evidence: {
-            ...(record.evidence ?? { text: content.slice(0, 500), location: filePath }),
-            sourceHash: contentHash,
-          },
-        };
-        const existing = memoryService.getMemory(stableRecord.id);
-        if (existing) {
-          const unchanged = existing.evidence?.sourceHash
-            ? existing.evidence.sourceHash === contentHash
-            : existing.content === content;
-          if (unchanged) continue;
-          memoryService.stageUpdateMemory(stableRecord.id, getFileUpdates(stableRecord, filePath));
-        } else {
-          memoryService.stageCreateMemoryRecord(stableRecord);
-        }
-      }
-
-      logger.ingest.info(
-        `[FileWatcher] 已入队 (${eventType}): ${filePath} → ${records.length} 条记忆`,
-      );
+      const result = await agent.ingestSourceRevision({
+        event: sourceEvent,
+        content,
+        sourceLocator: filePath,
+      });
+      logger.ingest.info(`[FileWatcher] 来源版本处理完成 (${eventType})`, {
+        sourceId: sourceEvent.sourceId,
+        revision: sourceEvent.revision,
+        status: result.status,
+        memoryIds: result.memoryIds,
+      });
     } finally {
-      memoryService.close();
+      agent.close();
     }
   } catch (error) {
     logger.ingest.error(`[FileWatcher] 导入失败 (${filePath}):`, {

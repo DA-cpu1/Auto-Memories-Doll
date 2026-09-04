@@ -1,13 +1,13 @@
-import { Orchestrator } from "../../server/services/orchestrator";
+import { KnowledgeAgent } from "../../server/services/knowledge-agent";
 
 export class AuditReplayer {
   async replayPendingEvents(): Promise<void> {
-    const orchestrator = new Orchestrator();
+    const agent = new KnowledgeAgent();
 
     try {
-      await orchestrator.processQueue();
+      await agent.processQueue();
     } finally {
-      orchestrator.close();
+      agent.close();
     }
   }
 }

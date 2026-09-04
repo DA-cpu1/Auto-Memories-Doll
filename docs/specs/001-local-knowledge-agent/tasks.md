@@ -3,7 +3,7 @@
 | 字段     | 内容                                       |
 | -------- | ------------------------------------------ |
 | 规范编号 | `LKA-001`                                  |
-| 状态     | 实施中，Phase 1 完成                       |
+| 状态     | 实施中，Phase 2 完成                       |
 | 执行原则 | Phase 1 特征测试通过前，不删除生产功能代码 |
 
 ## 任务标记
@@ -41,12 +41,12 @@ npm run test:e2e
 
 ## Phase 2：建立显式知识整理 Agent
 
-- [ ] **T2.1 定义来源版本契约**：关联 FR-004、FR-023。为 `SourceRevisionEvent`、来源身份和版本哈希增加 TypeScript 与 Zod 契约。
-- [ ] **T2.2 建立来源注册表**：关联 FR-001、FR-004。从当前工具来源配置中提取或扩展规范路径、最新版本和健康状态。
-- [ ] **T2.3 统一 Watcher 输出**：关联 FR-002、FR-003。让文件、工具目录和 listen 输入产生同一种来源版本事件。
-- [ ] **T2.4 增加 Agent 状态迁移保护**：关联项目原则 1、FR-011、NFR-002。集中约束合法状态迁移，并恢复进程中断留下的 processing 事件。
-- [ ] **T2.5 提取 `KnowledgeAgent` 编排边界**：关联项目原则 1、NFR-007。在保持现有 Orchestrator 行为的基础上，将路由和状态所有权迁入命名明确的服务。
-- [ ] **T2.6 输出阶段进度**：关联 FR-023。为状态页和日志提供类型化本地进度事件，禁止核心代码依赖 React。
+- [x] **T2.1 定义来源版本契约**：关联 FR-004、FR-023。已增加 `SourceRevisionEvent` TypeScript 类型、Zod schema、规范路径、稳定来源 ID、版本哈希和稳定事件 ID 工厂。
+- [x] **T2.2 建立来源注册表**：关联 FR-001、FR-004。`SourceRegistry` 通过 `source_documents` 持久化规范路径、最新成功版本、观察时间、处理时间和健康状态，并同步现有工具来源配置。
+- [x] **T2.3 统一 Watcher 输出**：关联 FR-002、FR-003。文件、工具目录和 listen 输入统一构造来源版本事件；add/change/delete/rescan 均通过 `KnowledgeAgent.ingestSourceRevision()` 进入处理链。
+- [x] **T2.4 增加 Agent 状态迁移保护**：关联项目原则 1、FR-011、NFR-002。Agent 阶段和兼容队列状态均由集中迁移表校验；processing 中断恢复保留事件 ID、来源 ID 和版本并递增 attempt。
+- [x] **T2.5 提取 `KnowledgeAgent` 编排边界**：关联项目原则 1、NFR-007。Watcher、listen、ingest、审核、冲突、重建、replay 和 AuditWorker 已改用 `KnowledgeAgent`；现有 `Orchestrator` 作为内部兼容执行引擎保留。
+- [x] **T2.6 输出阶段进度**：关联 FR-023。`processing_attempts` 持久化类型化 `AgentProgressEvent`，结构化日志包含来源、版本、事件、阶段、attempt、耗时、结果、错误和降级能力；`GET /api/listen` 暴露只读状态快照。
 
 ## Phase 3：增强去噪和来源追踪
 

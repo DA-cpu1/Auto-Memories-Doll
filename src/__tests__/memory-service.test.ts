@@ -174,8 +174,9 @@ describe("MemoryService — 队列基础操作", () => {
 
     expect(svc.hasPendingEventWithTag("m1", "旧记忆优化")).toBe(true);
 
-    event.status = "done";
-    svc.updateEvent(event);
+    const claimed = svc.dequeueEvent("m1")!;
+    claimed.status = "done";
+    svc.updateEvent(claimed);
     expect(svc.hasPendingEventWithTag("m1", "旧记忆优化")).toBe(false);
   });
 

@@ -1,16 +1,15 @@
 import { watch, FSWatcher } from "chokidar";
-import { readdir } from "fs/promises";
+import { readFile, readdir } from "fs/promises";
 import { statSync } from "fs";
 import { isAbsolute, join, relative, resolve } from "path";
-import { createHash } from "crypto";
 import { ConfigService } from "../services/config-service";
 import { ToolWatchSource } from "../../types/config";
-import { parseSession } from "../../lib/tools/session-parser";
-import { MemoryService } from "../services/memory-service";
 import { isRecentWrite } from "../../lib/storage/write-tracker";
 import { logger } from "../../lib/logger";
-import { buildKnowledgeLogFromText } from "../../features/ingest/knowledge-log";
 import { getMemoryRoot } from "../../lib/storage/path-resolver";
+import { createSourceRevisionEvent } from "../../lib/source/source-revision";
+import { KnowledgeAgent } from "../services/knowledge-agent";
+import { SourceRegistry } from "../services/source-registry";
 
 /**
  * 本地工具工作目录监听器。
@@ -28,9 +27,6 @@ import { getMemoryRoot } from "../../lib/storage/path-resolver";
 
 /** 防抖静默窗口：文件最后一次变更后静默如此之久才采集 */
 const DEBOUNCE_QUIET_MS = 90_000;
-/** 会话内容入库上限：超大会话全文 embedding+LLM 闸门耗时数分钟，会拖死队列 */
-const SESSION_CONTENT_MAX_CHARS = 10_000;
-
 interface WatcherEntry {
   source: ToolWatchSource;
   watcher: FSWatcher;
@@ -57,17 +53,6 @@ function fileSignature(filePath: string): string {
   }
 }
 
-/** 来源文件 → 稳定记忆 ID：同一会话文件永远落到同一 memoryId，重启重扫不会重复建卡 */
-function getStableSessionMemoryId(sourceId: string, filePath: string): string {
-  const resolvedPath = filePath.replace(/\\/g, "/").toLowerCase();
-  return `tool-${createHash("sha256").update(`${sourceId}:${resolvedPath}`).digest("hex").slice(0, 32)}`;
-}
-
-/** 来源原文的 sha256：入库内容是中文重写卡，靠此哈希判断来源文件是否变更 */
-function sourceHashOf(content: string): string {
-  return createHash("sha256").update(content).digest("hex");
-}
-
 /**
  * 启动所有已启用的工具监听源。
  * 在 instrumentation.ts 中调用。
@@ -80,7 +65,11 @@ export async function startToolDirWatcher(): Promise<void> {
   const configService = new ConfigService();
   let sources: ToolWatchSource[];
   try {
-    sources = configService.listEnabledToolSources();
+    const configuredSources = configService.listToolSources();
+    const sourceRegistry = new SourceRegistry();
+    sourceRegistry.syncConfiguredSources(configuredSources);
+    sourceRegistry.close();
+    sources = configuredSources.filter((source) => source.enabled);
   } finally {
     configService.close();
   }
@@ -99,6 +88,8 @@ export async function startToolDirWatcher(): Promise<void> {
 }
 
 async function startSingleSource(source: ToolWatchSource): Promise<void> {
+  const sourceRegistry = new SourceRegistry();
+  const registeredSource = sourceRegistry.registerConfiguredSource(source);
   try {
     // 展开 ~ 为用户主目录（chokidar/fs 在 Windows 上不识别 ~ 前缀）。
     // 直接读取环境变量，避免 Next.js 文件追踪器在构建时递归扫描整个用户目录。
@@ -127,7 +118,7 @@ async function startSingleSource(source: ToolWatchSource): Promise<void> {
 
     // 防抖调度：add/change 只重置定时器，静默 DEBOUNCE_QUIET_MS 后才真正解析入队。
     // 会话文件在活跃对话期间每秒都在追加，立即采集会反复解析半截内容。
-    const schedule = (filePath: string) => {
+    const schedule = (filePath: string, operation: "add" | "change" | "delete") => {
       const timerKey = `${source.id}:${filePath}`;
       const existing = pendingTimers.get(timerKey);
       if (existing) clearTimeout(existing);
@@ -135,30 +126,36 @@ async function startSingleSource(source: ToolWatchSource): Promise<void> {
         timerKey,
         setTimeout(() => {
           pendingTimers.delete(timerKey);
-          void handleFileEvent(filePath, source, allowedExts);
+          void handleFileEvent(filePath, source, allowedExts, operation);
         }, DEBOUNCE_QUIET_MS),
       );
     };
 
-    watcher.on("add", (filePath) => schedule(filePath));
-    watcher.on("change", (filePath) => schedule(filePath));
+    watcher.on("add", (filePath) => schedule(filePath, "add"));
+    watcher.on("change", (filePath) => schedule(filePath, "change"));
+    watcher.on("unlink", (filePath) => schedule(filePath, "delete"));
 
     watcher.on("error", (error) => {
+      sourceRegistry.setHealth(registeredSource.sourceId, "unavailable", (error as Error).message);
       logger.ingest.error(`[ToolDirWatcher] 监听源 "${source.name}" 错误:`, {
         error: (error as Error).message,
       });
     });
 
     entries.push({ source, watcher });
+    sourceRegistry.setHealth(registeredSource.sourceId, "healthy");
     logger.ingest.info(`[ToolDirWatcher] 监听源 "${source.name}" 已启动`, {
       path: source.path,
       toolType: source.toolType,
       pattern,
     });
   } catch (error) {
+    sourceRegistry.setHealth(registeredSource.sourceId, "unavailable", (error as Error).message);
     logger.ingest.error(`[ToolDirWatcher] 启动监听源 "${source.name}" 失败:`, {
       error: (error as Error).message,
     });
+  } finally {
+    sourceRegistry.close();
   }
 }
 
@@ -181,6 +178,7 @@ async function handleFileEvent(
   filePath: string,
   source: ToolWatchSource,
   allowedExts: string[],
+  operation: "add" | "change" | "delete" | "rescan",
 ): Promise<void> {
   // 按扩展名过滤
   const ext = filePath.slice(filePath.lastIndexOf("."));
@@ -190,7 +188,7 @@ async function handleFileEvent(
   if (isRecentWrite(filePath)) return;
 
   // 去重：相同 mtime+size 的文件不重复处理
-  const sig = fileSignature(filePath);
+  const sig = operation === "delete" ? "deleted" : fileSignature(filePath);
   const key = `${source.id}:${filePath}`;
   if (sig && processedFiles.get(key) === sig) return;
   processedFiles.set(key, sig);
@@ -202,86 +200,36 @@ async function handleFileEvent(
   }
 
   try {
-    const session = await parseSession(filePath, source.toolType);
-    if (!session || session.messageCount === 0) return;
-
-    const topic = source.topic || defaultTopicForTool(source.toolType);
-    const tags = [source.toolType, "tool-session"];
-    if (source.topic) tags.push(source.topic);
-
-    // 超长会话头部截断：尾部追加不影响头部，稳定 ID + 内容跳过逻辑仍然有效
-    const content = limitSessionContent(session.content);
-    const knowledgeLog = buildKnowledgeLogFromText(content, {
-      source: source.name,
+    const rawContent =
+      operation === "delete" ? Buffer.from(`deleted:${filePath}`) : await readFile(filePath);
+    const sourceEvent = createSourceRevisionEvent({
+      sourceType: source.toolType,
+      sourcePath: filePath,
+      content: rawContent,
+      operation,
     });
-    const hash = sourceHashOf(content);
-
-    const memoryService = new MemoryService();
+    const agent = new KnowledgeAgent();
     try {
-      const stableId = getStableSessionMemoryId(source.id, filePath);
-      const existing = memoryService.getMemory(stableId);
-
-      if (existing) {
-        // 抽取型记忆：入库内容是中文重写卡，与原文不可字面比对，靠 sourceHash 判断变更
-        if (existing.evidence?.sourceHash) {
-          if (existing.evidence.sourceHash === hash) return; // 原文未变更，跳过
-        } else if (existing.content === content) {
-          return; // 旧的原文型记忆且内容未变
-        }
-        // 内容有变更：清掉队列中同内容的未完成事件后走更新事件（触发分卡重建）
-        if (memoryService.hasEquivalentPendingEvent(stableId, knowledgeLog.content)) return;
-        memoryService.stageUpdateMemory(stableId, {
-          content: knowledgeLog.content,
-          summary: knowledgeLog.summary,
-          evidence: {
-            text: content.slice(0, 500),
-            location: filePath,
-            sourceHash: hash,
-          },
-        });
-        logger.ingest.info(`[ToolDirWatcher] 会话已更新，重新入队`, {
-          source: source.name,
-          memoryId: stableId,
-        });
-        return;
-      }
-
-      // 新文件：队列里已有同内容事件（重启重扫、旧事件仍在积压）→ 跳过
-      if (memoryService.hasEquivalentPendingEvent(stableId, knowledgeLog.content)) return;
-
-      memoryService.stageCreateMemory(
-        `${source.name}:${filePath}`,
-        "ingest",
-        session.title,
-        knowledgeLog.content,
-        knowledgeLog.summary,
-        tags,
-        topic,
-        undefined,
-        stableId,
-        // 采集入口必须带证据链：原文片段 + 文件位置 + 原文哈希，供闸门校验与变更检测
-        { evidence: { text: content.slice(0, 500), location: filePath, sourceHash: hash } },
-      );
-      logger.ingest.info(`[ToolDirWatcher] 已采集会话`, {
+      const result = await agent.ingestSourceRevision({
+        event: sourceEvent,
+        sourceLocator: filePath,
+        toolSource: source,
+      });
+      logger.ingest.info(`[ToolDirWatcher] 来源版本处理完成`, {
         source: source.name,
-        title: session.title,
-        messages: session.messageCount,
+        sourceId: sourceEvent.sourceId,
+        revision: sourceEvent.revision,
+        status: result.status,
+        memoryIds: result.memoryIds,
       });
     } finally {
-      memoryService.close();
+      agent.close();
     }
   } catch (error) {
     logger.ingest.error(`[ToolDirWatcher] 解析文件失败: ${filePath}`, {
       error: (error as Error).message,
     });
   }
-}
-
-function limitSessionContent(content: string): string {
-  if (content.length <= SESSION_CONTENT_MAX_CHARS) return content;
-  const tailLength = 2_500;
-  const headLength = SESSION_CONTENT_MAX_CHARS - tailLength;
-  return `${content.slice(0, headLength)}\n\n<!-- 中间内容已截断，原文 ${content.length} 字符 -->\n\n${content.slice(-tailLength)}`;
 }
 
 /**
@@ -308,7 +256,7 @@ export async function scanToolSources(): Promise<number> {
         const ext = normalized.slice(normalized.lastIndexOf("."));
         if (!allowedExts.includes(ext)) continue;
         // 防抖绕过：扫描要求立即采集，直接走处理函数（内部仍有内容级跳过）
-        await handleFileEvent(join(watchPath, rel), entry.source, allowedExts);
+        await handleFileEvent(join(watchPath, rel), entry.source, allowedExts, "rescan");
         scanned++;
       }
     } catch (error) {
@@ -318,19 +266,6 @@ export async function scanToolSources(): Promise<number> {
     }
   }
   return scanned;
-}
-
-function defaultTopicForTool(toolType: string): string {
-  switch (toolType) {
-    case "codex":
-      return "codex-sessions";
-    case "claude-code":
-      return "claude-code-sessions";
-    case "cursor":
-      return "cursor-sessions";
-    default:
-      return "tool-sessions";
-  }
 }
 
 /**

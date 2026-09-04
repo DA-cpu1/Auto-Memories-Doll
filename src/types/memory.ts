@@ -112,6 +112,10 @@ export type EmbeddingModelConfig = {
 export type PendingEvent = {
   eventId: string;
   memoryId: string;
+  /** 触发该候选的统一来源事件；旧队列记录允许为空。 */
+  sourceEventId?: string;
+  sourceId?: string;
+  sourceRevision?: string;
   sourceType: "chat" | "ingest" | "manual" | "mcp" | "skill" | "listen";
   /** 事件类型：缺省时由消费端按记忆是否存在区分 create/update；delete 必须显式声明 */
   eventType?: "create" | "update" | "delete";

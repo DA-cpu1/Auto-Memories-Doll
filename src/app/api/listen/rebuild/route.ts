@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { Orchestrator } from "../../../../server/services/orchestrator";
+import { KnowledgeAgent } from "../../../../server/services/knowledge-agent";
 import { scanMemoryRoot } from "../../../../server/watchers/file-watcher";
 import { scanToolSources } from "../../../../server/watchers/tool-dir-watcher";
 import { ErrorCode } from "../../../../lib/api-errors";
@@ -18,10 +18,9 @@ import { logger } from "../../../../lib/logger";
  * 对话/手动/MCP 创建的记忆不受影响。
  */
 export async function POST(_request: NextRequest) {
+  const agent = new KnowledgeAgent();
   try {
-    // 动态 import 不可用（Orchestrator 无启动副作用），直接实例化，与其它路由一致
-    const orchestrator = new Orchestrator();
-    const deleted = await orchestrator.rebuildCollectedMemories();
+    const deleted = await agent.rebuildCollectedMemories();
     const scannedFiles = await scanMemoryRoot();
     const scannedSources = await scanToolSources();
     const scanned = scannedFiles + scannedSources;
@@ -38,5 +37,7 @@ export async function POST(_request: NextRequest) {
       stack: error instanceof Error ? error.stack : undefined,
     });
     return NextResponse.json(apiError(ErrorCode.INTERNAL_ERROR, "重建失败"), { status: 500 });
+  } finally {
+    agent.close();
   }
 }

@@ -1,13 +1,13 @@
 import { NextResponse } from "next/server";
-import { Orchestrator } from "../../../../server/services/orchestrator";
+import { KnowledgeAgent } from "../../../../server/services/knowledge-agent";
 import { ErrorCode } from "../../../../lib/api-errors";
 import { apiError } from "../../../../lib/api-response";
 import { logger } from "../../../../lib/logger";
 
 export async function POST() {
-  const orchestrator = new Orchestrator();
+  const agent = new KnowledgeAgent();
   try {
-    const queued = await orchestrator.enqueueFullMemoryRebuild();
+    const queued = await agent.enqueueFullMemoryRebuild();
     return NextResponse.json({
       success: true,
       queued,
@@ -21,6 +21,6 @@ export async function POST() {
       status: 500,
     });
   } finally {
-    orchestrator.close();
+    agent.close();
   }
 }

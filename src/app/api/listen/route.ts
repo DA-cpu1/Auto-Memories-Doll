@@ -1,9 +1,12 @@
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
-import { ConversationProcessor } from "../../../features/ingest/conversation-processor";
-import { MemoryService } from "../../../server/services/memory-service";
+import { KnowledgeAgent } from "../../../server/services/knowledge-agent";
 import { ListenStatsService } from "../../../server/services/listen-stats-service";
 import { getNotePath } from "../../../lib/storage/path-resolver";
+import {
+  createSourceRevision,
+  createSourceRevisionEvent,
+} from "../../../lib/source/source-revision";
 import { ErrorCode } from "../../../lib/api-errors";
 import { apiError } from "../../../lib/api-response";
 import { logger } from "../../../lib/logger";
@@ -61,15 +64,16 @@ export async function POST(request: NextRequest) {
   }
 
   let body: unknown;
+  let rawBody: string;
   try {
-    const raw = await request.text();
-    if (Buffer.byteLength(raw, "utf8") > MAX_LISTEN_BODY_BYTES) {
+    rawBody = await request.text();
+    if (Buffer.byteLength(rawBody, "utf8") > MAX_LISTEN_BODY_BYTES) {
       return NextResponse.json(
         apiError(ErrorCode.VALIDATION_FAILED, `请求体不能超过 ${MAX_LISTEN_BODY_BYTES} bytes`),
         { status: 413 },
       );
     }
-    body = JSON.parse(raw);
+    body = JSON.parse(rawBody);
   } catch {
     return NextResponse.json(apiError(ErrorCode.INVALID_JSON, "请求体不是有效 JSON"), {
       status: 400,
@@ -86,48 +90,27 @@ export async function POST(request: NextRequest) {
   }
 
   const data = parsed.data;
-  let memoryService: MemoryService | undefined;
+  let agent: KnowledgeAgent | undefined;
   let statsService: ListenStatsService | undefined;
 
   try {
-    const processor = new ConversationProcessor();
-    memoryService = new MemoryService();
+    agent = new KnowledgeAgent();
     statsService = new ListenStatsService();
-
-    // 1. 格式化对话并提取话题
-    const { title, content, topic } = processor.formatConversation(data);
-
-    // 2. 生成知识卡片
-    const knowledgeCard = processor.generateKnowledgeCard(data);
-    const memoryContent = knowledgeCard.content || content;
-
-    // 3. 唯一写入入口：先进入待审计队列，禁止在这里提前写 Markdown
-    const memoryId = memoryService.stageCreateMemory(
-      data.source,
-      data.sourceType,
-      title,
-      memoryContent,
-      knowledgeCard.summary,
-      knowledgeCard.tags,
-      topic,
-      {
-        titleZh: knowledgeCard.titleZh,
-        summaryZh: knowledgeCard.summary,
-        tagsZh: knowledgeCard.tagsZh,
-        topicZh: knowledgeCard.topicZh,
-      },
-      undefined,
-      // 监听入口属于采集类：携带来源证据（原文 + 可选 URL），供质量闸门做证据校验
-      {
-        evidence: {
-          text: memoryContent.slice(0, 500),
-          location: data.metadata?.url,
-        },
-      },
-    );
+    const sourceEvent = createSourceRevisionEvent({
+      sourceType: "listen",
+      sourceKey: listenSourceIdentity(data, rawBody),
+      content: rawBody,
+      operation: "add",
+    });
+    const result = await agent.ingestSourceRevision({ event: sourceEvent, conversation: data });
+    const memoryId = result.memoryIds[0];
+    const topic = result.topic;
+    const knowledgeCard = result.knowledgeCard;
+    if (!memoryId || !topic || !knowledgeCard) {
+      throw new Error(`监听来源没有生成候选: ${sourceEvent.sourceId}`);
+    }
     const filePath = getNotePath(topic, memoryId);
 
-    // 4. 更新持久统计
     statsService.record(data.source, topic, true);
 
     return NextResponse.json({
@@ -138,7 +121,7 @@ export async function POST(request: NextRequest) {
       knowledgeCard: {
         title: knowledgeCard.title,
         summary: knowledgeCard.summary,
-        content: memoryContent,
+        content: knowledgeCard.content,
         tags: knowledgeCard.tags,
         topic: knowledgeCard.topic,
       },
@@ -161,9 +144,20 @@ export async function POST(request: NextRequest) {
       status: 500,
     });
   } finally {
-    memoryService?.close();
+    agent?.close();
     statsService?.close();
   }
+}
+
+function listenSourceIdentity(data: z.infer<typeof listenRequestSchema>, rawBody: string): string {
+  const metadata = data.metadata as Record<string, unknown> | undefined;
+  const externalId = metadata?.conversationId ?? metadata?.sessionId;
+  if (typeof externalId === "string" && externalId.trim()) {
+    return `${data.source}:${externalId.trim()}`;
+  }
+  if (data.metadata?.url) return `${data.source}:${data.metadata.url}`;
+  if (data.title?.trim()) return `${data.source}:${data.title.trim()}`;
+  return `${data.source}:${createSourceRevision(rawBody)}`;
 }
 
 /**
@@ -174,6 +168,10 @@ export async function GET() {
   const statsService = new ListenStatsService();
   const stats = statsService.getStats();
   statsService.close();
+  const agent = new KnowledgeAgent();
+  const sources = agent.listSources();
+  const progress = agent.listRecentProgress();
+  agent.close();
 
   // 动态 import：避免路由 bundle 在模块加载期触发 watcher 模块的启动副作用，
   // 同时解决 dev 模式下 instrumentation 与路由模块实例隔离导致的状态不可见
@@ -184,6 +182,7 @@ export async function GET() {
     status: "listening",
     uptime: process.uptime(),
     stats,
+    agent: { sources, progress },
     watchers: {
       fileWatcher: getFileWatcherStatus(),
       toolSources: getActiveSources(),

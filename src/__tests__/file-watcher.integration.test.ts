@@ -16,6 +16,13 @@ vi.mock("../server/services/memory-service", () => ({
       return watcherMemoryState.memories.get(id) || null;
     }
 
+    hasEquivalentPendingEvent(id: string, content: string) {
+      return watcherMemoryState.pending.some((event) => {
+        if (event.memoryId !== id) return false;
+        return (JSON.parse(event.candidate) as MemoryRecord).content === content;
+      });
+    }
+
     stageCreateMemoryRecord(record: any) {
       watcherMemoryState.pending.push({
         eventId: `create-${watcherMemoryState.pending.length}`,

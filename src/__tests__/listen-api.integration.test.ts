@@ -1,13 +1,10 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { NextRequest } from "next/server";
 
-const processorMock = vi.hoisted(() => ({
-  formatConversation: vi.fn(),
-  generateKnowledgeCard: vi.fn(),
-}));
-
-const memoryServiceMock = vi.hoisted(() => ({
-  stageCreateMemory: vi.fn(),
+const knowledgeAgentMock = vi.hoisted(() => ({
+  ingestSourceRevision: vi.fn(),
+  listSources: vi.fn(() => []),
+  listRecentProgress: vi.fn(() => []),
   close: vi.fn(),
 }));
 
@@ -19,12 +16,8 @@ const listenStatsDbRef = vi.hoisted(() => ({
   current: null as import("better-sqlite3").Database | null,
 }));
 
-vi.mock("../features/ingest/conversation-processor", () => ({
-  ConversationProcessor: vi.fn(() => processorMock),
-}));
-
-vi.mock("../server/services/memory-service", () => ({
-  MemoryService: vi.fn(() => memoryServiceMock),
+vi.mock("../server/services/knowledge-agent", () => ({
+  KnowledgeAgent: vi.fn(() => knowledgeAgentMock),
 }));
 
 vi.mock("../lib/logger", () => ({
@@ -81,18 +74,19 @@ async function expectError(response: Response, status: number, code: string, mes
 beforeEach(() => {
   vi.clearAllMocks();
   listenStatsDbRef.current?.exec("DROP TABLE IF EXISTS listen_stats");
-  processorMock.formatConversation.mockReturnValue({
-    title: "监听标题",
-    content: "监听正文",
+  knowledgeAgentMock.ingestSourceRevision.mockResolvedValue({
+    status: "staged",
+    sourceEvent: {},
+    memoryIds: ["stable-listen-id"],
     topic: "ai-coding",
+    knowledgeCard: {
+      title: "监听标题",
+      summary: "监听摘要",
+      content: "监听正文",
+      tags: ["listen"],
+      topic: "ai-coding",
+    },
   });
-  processorMock.generateKnowledgeCard.mockReturnValue({
-    title: "监听标题",
-    summary: "监听摘要",
-    tags: ["listen"],
-    topic: "ai-coding",
-  });
-  memoryServiceMock.stageCreateMemory.mockReturnValue("stable-listen-id");
   loggerMock.error.mockReset();
 });
 
@@ -108,29 +102,16 @@ describe("POST /api/listen", () => {
 
     expect(response.status).toBe(200);
     expect(body.success).toBe(true);
-    expect(memoryServiceMock.stageCreateMemory).toHaveBeenCalledTimes(1);
-    expect(memoryServiceMock.stageCreateMemory).toHaveBeenCalledWith(
-      "browser",
-      "listen",
-      "监听标题",
-      "监听正文",
-      "监听摘要",
-      ["listen"],
-      "ai-coding",
-      {
-        titleZh: undefined,
-        summaryZh: "监听摘要",
-        tagsZh: undefined,
-        topicZh: undefined,
-      },
-      undefined,
-      {
-        evidence: {
-          text: "监听正文",
-          location: undefined,
-        },
-      },
-    );
+    expect(knowledgeAgentMock.ingestSourceRevision).toHaveBeenCalledTimes(1);
+    expect(knowledgeAgentMock.ingestSourceRevision).toHaveBeenCalledWith({
+      event: expect.objectContaining({
+        sourceType: "listen",
+        operation: "add",
+        sourceId: expect.stringMatching(/^source-/),
+        revision: expect.stringMatching(/^[a-f0-9]{64}$/),
+      }),
+      conversation: expect.objectContaining({ source: "browser", sourceType: "listen" }),
+    });
     expect(body.memoryId).toBe("stable-listen-id");
     expect(body.filePath).toBe("/memory-root/notes/ai-coding/stable-listen-id.md");
   });
@@ -149,20 +130,21 @@ describe("POST /api/listen", () => {
 
     expect(body.stats.totalReceived).toBeGreaterThanOrEqual(1);
     expect(body.stats.sources.browser).toBeGreaterThanOrEqual(1);
+    expect(body.agent).toEqual({ sources: [], progress: [] });
   });
 
   it("returns INVALID_JSON for malformed JSON", async () => {
     const response = await POST(rawRequest("http://localhost/api/listen", "{"));
 
     await expectError(response, 400, "INVALID_JSON", "请求体不是有效 JSON");
-    expect(memoryServiceMock.stageCreateMemory).not.toHaveBeenCalled();
+    expect(knowledgeAgentMock.ingestSourceRevision).not.toHaveBeenCalled();
   });
 
   it("returns VALIDATION_FAILED for an empty object", async () => {
     const response = await POST(jsonRequest("http://localhost/api/listen", {}));
 
     await expectError(response, 400, "VALIDATION_FAILED");
-    expect(memoryServiceMock.stageCreateMemory).not.toHaveBeenCalled();
+    expect(knowledgeAgentMock.ingestSourceRevision).not.toHaveBeenCalled();
   });
 
   it("returns VALIDATION_FAILED when source is missing", async () => {
@@ -173,7 +155,7 @@ describe("POST /api/listen", () => {
     );
 
     await expectError(response, 400, "VALIDATION_FAILED", "source 不能为空");
-    expect(memoryServiceMock.stageCreateMemory).not.toHaveBeenCalled();
+    expect(knowledgeAgentMock.ingestSourceRevision).not.toHaveBeenCalled();
   });
 
   it("returns VALIDATION_FAILED for empty messages", async () => {
@@ -182,7 +164,7 @@ describe("POST /api/listen", () => {
     );
 
     await expectError(response, 400, "VALIDATION_FAILED", "messages 至少需要一条消息");
-    expect(memoryServiceMock.stageCreateMemory).not.toHaveBeenCalled();
+    expect(knowledgeAgentMock.ingestSourceRevision).not.toHaveBeenCalled();
   });
 
   it("rejects oversized request bodies before processing", async () => {
@@ -195,7 +177,7 @@ describe("POST /api/listen", () => {
     );
 
     await expectError(response, 413, "VALIDATION_FAILED", "请求体不能超过 1000000 bytes");
-    expect(memoryServiceMock.stageCreateMemory).not.toHaveBeenCalled();
+    expect(knowledgeAgentMock.ingestSourceRevision).not.toHaveBeenCalled();
   });
 
   it("rejects message batches above the listen limit", async () => {
@@ -210,13 +192,13 @@ describe("POST /api/listen", () => {
     );
 
     await expectError(response, 400, "VALIDATION_FAILED");
-    expect(memoryServiceMock.stageCreateMemory).not.toHaveBeenCalled();
+    expect(knowledgeAgentMock.ingestSourceRevision).not.toHaveBeenCalled();
   });
 
   it("returns a stable internal error without exposing processor details", async () => {
-    processorMock.formatConversation.mockImplementationOnce(() => {
-      throw new Error("sensitive processor detail");
-    });
+    knowledgeAgentMock.ingestSourceRevision.mockRejectedValueOnce(
+      new Error("sensitive processor detail"),
+    );
 
     const response = await POST(
       jsonRequest("http://localhost/api/listen", {
@@ -230,7 +212,6 @@ describe("POST /api/listen", () => {
       "POST /api/listen 处理失败",
       expect.objectContaining({ message: "sensitive processor detail" }),
     );
-    expect(memoryServiceMock.stageCreateMemory).not.toHaveBeenCalled();
   });
 
   it("rejects a body that exceeds the limit after reading it", async () => {
@@ -241,6 +222,6 @@ describe("POST /api/listen", () => {
     const response = await POST(rawRequest("http://localhost/api/listen", oversizedBody));
 
     await expectError(response, 413, "VALIDATION_FAILED");
-    expect(memoryServiceMock.stageCreateMemory).not.toHaveBeenCalled();
+    expect(knowledgeAgentMock.ingestSourceRevision).not.toHaveBeenCalled();
   });
 });

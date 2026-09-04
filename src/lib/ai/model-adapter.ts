@@ -57,6 +57,16 @@ export class ModelAdapter {
     return this.llmDegraded || this.embeddingDegraded || !this.hasConfiguredApiKey();
   }
 
+  static getDegradedCapabilities(): Array<"llm" | "embedding"> {
+    const config = getConfig();
+    const degraded: Array<"llm" | "embedding"> = [];
+    if (this.llmDegraded || !config.apiKey?.trim()) degraded.push("llm");
+    if (this.embeddingDegraded || !(config.embedding.apiKey || config.apiKey)?.trim()) {
+      degraded.push("embedding");
+    }
+    return degraded;
+  }
+
   /** 获取并发池统计信息 */
   static getPoolStats() {
     return this.pool.getStats();

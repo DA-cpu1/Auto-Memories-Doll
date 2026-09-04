@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { Orchestrator } from "../../../server/services/orchestrator";
+import { KnowledgeAgent } from "../../../server/services/knowledge-agent";
 import { ingestRequestSchema } from "../../../lib/validation";
 import { MemoryValidationError } from "../../../lib/errors";
 import { ErrorCode } from "../../../lib/api-errors";
@@ -26,12 +26,12 @@ export async function POST(request: NextRequest) {
 
   const { content, format } = parsed.data;
 
-  const orchestrator = new Orchestrator();
+  const agent = new KnowledgeAgent();
 
   try {
-    // 文本格式：直接送入 Orchestrator 预处理管线（清洗 → 去重 → 拆包 → 入队）
+    // 文本格式：送入 KnowledgeAgent 兼容预处理管线（清洗 → 去重 → 拆包 → 入队）
     const textContent = format === "json" ? content : content;
-    const eventId = await orchestrator.processIngest(
+    const eventId = await agent.processIngest(
       "ingest-api",
       "ingest",
       textContent,
@@ -53,6 +53,6 @@ export async function POST(request: NextRequest) {
       status: 500,
     });
   } finally {
-    orchestrator.close();
+    agent.close();
   }
 }
