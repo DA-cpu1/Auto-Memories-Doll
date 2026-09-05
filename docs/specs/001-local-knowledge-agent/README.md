@@ -5,7 +5,7 @@
 | 字段     | 内容                                                            |
 | -------- | --------------------------------------------------------------- |
 | 规范编号 | `LKA-001`                                                       |
-| 状态     | 已确认，Phase 2 至 Phase 7 完成                                 |
+| 状态     | 已完成，Phase 0 至 Phase 8 验收通过                             |
 | 创建日期 | 2026-09-03                                                      |
 | 目标产品 | 本地知识整理 Agent                                              |
 | Git 基线 | `main`，改造前暂存为 `pre-sdd-knowledge-agent-scope-2026-09-03` |
@@ -28,6 +28,8 @@
 8. [phase-4-decoupling.md](./phase-4-decoupling.md)：保留代码与聊天、画像、Prompt、MCP/Skills 的解耦报告。
 9. [phase-5-scope-removal.md](./phase-5-scope-removal.md)：范围外页面、API、运行时与依赖删除报告。
 10. [phase-6-study-guides.md](./phase-6-study-guides.md)：主题学习资料、引用验证、原子发布与增量刷新报告。
+11. [phase-7-user-interface.md](./phase-7-user-interface.md)：状态、来源、检索、主题资料与审核界面报告。
+12. [phase-8-delivery.md](./phase-8-delivery.md)：最终验证、死代码审计、前后指标与作品集演示报告。
 
 ## 一句话定位
 

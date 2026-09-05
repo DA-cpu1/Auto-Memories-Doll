@@ -1,53 +1,36 @@
 # 贡献指南
 
-感谢你对 Auto-Memeries-Doll 的关注！这是一个个人学习项目，欢迎任何形式的反馈和建议。
+开发前先阅读 `Agents.md` 与 `docs/specs/001-local-knowledge-agent/`。项目范围是本地知识整理 Agent，不接受重新引入通用聊天、画像、人格 Prompt、聊天型 MCP/Skills 或浏览器历史采集的改动。
 
-## 报告问题
+## 架构约束
 
-在提交 Issue 之前，请先检查是否已有相同的报告。
+1. `src/features/` 和 `src/lib/` 不依赖 React、Next.js 路由或 CSS。
+2. 采集入口统一产生 `SourceRevisionEvent`，处理进度统一写 `AgentProgressEvent`。
+3. 候选先进入 SQLite `pending_events`，接受后才能发布 Markdown。
+4. 模型调用只经过 `KnowledgeModelAdapter`；降级必须可见且 fail-closed。
+5. 新 API 必须登记到 `src/config/api-route-contracts.ts` 并在入口做 Zod 校验。
+6. 文档、测试和实现必须在同一变更中更新。
 
-提交 Issue 时请包含：
-
-- 环境信息（Node.js 版本、操作系统）
-- 复现步骤
-- 期望行为 vs 实际行为
-- 相关日志输出（`LOG_LEVEL=debug`）
-
-## 代码规范
-
-- TypeScript strict mode，所有新代码必须通过 `npm run typecheck`
-- 提交前运行 `npm test` 确保测试通过
-- 新功能请附带测试用例
-- 代码格式使用 Prettier，提交前运行 `npm run format`
-
-## 项目架构
-
-开发前请先阅读 `AGENTS.md`，了解项目的分层设计、数据流和核心约束。
-
-关键原则：
-
-1. **核心零 UI 依赖** — `src/features/` 和 `src/lib/` 不导入 React 组件
-2. **事件驱动** — Agent 循环通过 `ReadableStream<AiEvent>` 输出，前端消费事件流
-3. **存储不可变追加** — 记忆和会话采用追加式日志，不修改已写入的数据
-4. **审计优先** — 所有记忆写入先进待审计队列，不直接落盘
-
-## 提交 PR
-
-1. Fork 仓库并创建分支（`git checkout -b feature/your-feature`）
-2. 确保测试通过和类型检查无误
-3. 提交 PR 时描述改动内容和动机
-4. 如果是较大的改动，建议先开 Issue 讨论
-
-## 当前优先事项
-
-查看 `AGENTS.md` 的 LKA-001 路线图；Phase 3 至 Phase 5 已完成，当前优先推进 Phase 6 主题学习资料。
-
-## 开发环境
+## 本地检查
 
 ```bash
-npm install
-npm run dev        # 启动开发服务器
-npm test           # 运行测试
-npm run typecheck  # 类型检查
-npm run format     # 格式化
+npm ci
+npm run format:check
+npm run typecheck
+npm run lint
+npm run audit:dead-code
+npm run test:coverage
+npm run eval
+npm run build
+npm run test:e2e
 ```
+
+Playwright 使用 `e2e/.tmp/` 隔离数据，不读写真实 `memory-root/`。首次运行需要 `npx playwright install chromium`。
+
+## 提交要求
+
+- 行为变更应有单元或集成测试；用户主流程变化应更新 Playwright。
+- 新检索策略必须更新版本化评测集和明确回归阈值。
+- 删除模块后运行 `npm run audit:dead-code`，并同步清理依赖。
+- 不提交 `.env*`、数据库、真实来源内容、日志或评测生成报告。
+- PR 描述应列出关联 FR/AC、故障行为和验证命令。

@@ -17,8 +17,8 @@
 | **存储路径热重载** | 数据库路径固定（env），笔记路径存 db 配置表可在设置面板修改并自动迁移 | `src/lib/storage/path-resolver.ts` |
 | **工具会话采集** | 监听 Cursor/Codex/Claude Code 工作目录，解析会话文件自动入队 | `src/server/watchers/tool-dir-watcher.ts` |
 | **多路召回** | 原句 + budget 模型改写变体并行检索、按最高相似度合并去重；改写失败自动退回单路 | `src/lib/vector/query-expansion.ts` / `query-rewriter.ts` |
-| **记忆纠错闭环** | 定位目标记忆 → budget 模型按指令改写 → 变更经审计队列落库并打 `corrected` 标签 | `src/lib/memory/correction.ts` |
 | **检索评测** | 固定评测集上的 Recall@k / MRR 回归基线，报告写入 `evals/reports/`，`npm run eval` 触发 | `src/eval/retrieval-eval.test.ts` |
+| **死代码门禁** | 从页面、API、middleware、instrumentation 与集中契约遍历生产 import 图，阻止不可达模块回流 | `scripts/audit-dead-code.mjs` |
 
 ## 1. 文档目标
 本文件用于描述系统架构、数据流、处理阶段、技术边界与推荐技术栈，供 AI 在编写、修改和审查代码时作为统一上下文。
@@ -368,7 +368,6 @@ memory-root/
 - 检索采用混合策略：关键词召回、向量召回、标签过滤三者并行，再进行合并与重排。
 - 向量召回前置多路召回（`searchWithExpansion`）：原句 + budget 模型改写变体分别检索，按最高相似度合并去重；改写失败或模型降级时自动退回单路原句召回。
 - 注入提示词时按召回的 `memoryId` 精确加载（`getMemoriesByIds`），不再全量拉取记忆库；主体相关记忆上限 8 条，叠加图谱邻居后总量不超过 `RETRIEVAL_MAX_INJECTED_MEMORIES`。
-- 记忆纠错闭环（`MemoryCorrectionService`）：按 `memoryId` 或检索定位目标 → budget 模型按纠错指令改写标题/摘要/内容 → 变更经 `stageUpdateMemory` 走审计队列落库并追加 `corrected` 标签；模型降级时拒绝改写以避免污染。
 - 检索质量由 `src/eval/retrieval-eval.test.ts` 的 Recall@k / MRR 基线守护，`npm run eval` 生成报告。
 - 重排优先级依次考虑相关度、知识完整性与来源可追溯质量、最近更新和访问次数，不得读取用户画像。
 - 检索结果注入 prompt 时，只注入摘要、来源和引用路径，不直接展开全部原文。
@@ -702,7 +701,7 @@ export type ConflictRecord = {
 | docs 目录未纳入版本控制 | 第 2 节要求文档跟随实现，差异有记录 | 已修复：`.gitignore` 明确放行 `docs/specs/**`，规范文档可进入版本控制；`docs/` 下其他个人资料和 `docs-zh/.obsidian/workspace.json` 继续忽略 | ~~P2~~ |
 | 降级状态恢复 | 第 4.11 节描述降级但未提恢复 | 已修复：`ModelAdapter.startHealthCheck()` 周期性轮询，恢复后自动退出降级；scheduler setInterval 类型修复 | ~~P1~~ |
 | 记忆创建绕过审计 | 第 4.8 节要求先入队再审计 | 已修复：tool-registry 的 create_memory/update_memory 改为生成 PendingEvent 入队而非直接写库 | ~~P0~~ |
-| MMR 重排 | 第 4.11 节"重排默认采用 MMR" | 已修复：`Ranker.rankWithMMR()` 实现真正的 MMR（α*score - (1-α)*max_sim），用 tags Jaccard 作为文档间相似度，α 默认 0.7；handler.ts 已切换到 rankWithMMR；保留 `rank()` 作为基础多因子加权排序供其他场景使用 | ~~P2~~ |
+| MMR 重排 | 第 4.11 节"重排默认采用 MMR" | 已修复：`Ranker.rankWithMMR()` 实现真正的 MMR（α*score - (1-α)*max_sim），用 tags Jaccard 作为文档间相似度，α 默认 0.7；Phase 8 将 `/api/memory/search` 接入多路召回、Wikilink 邻居与 MMR | ~~P2~~ |
 | reject 路径 | 第 4.10 节"不可合并：schema 版本不兼容、数据损坏或格式校验失败" | 已修复：`conflict-resolver.ts` 补全三种 reject 触发条件（candidate.version < existing.version / 必要字段为空 / tags|graphLinks 非数组），reject 优先级在字段比对前；Auditor 处理 reject 时 status=failed 并透传 reason | ~~P1~~ |
 | 向量检索相似度阈值 | 无约束 | 已修复：`VectorRetriever.search` 新增 `minSimilarity` 参数（默认 0.3），过滤低相似度噪声；搜索 API 新增 `?threshold=` 查询参数 | ~~P1~~ |
 | MCP 工具 execute | 未描述 | 已修复：`handler.ts collectToolDefs` 为 MCP 工具包装 execute 闭包调用 `mcpManager.callTool`，替代原先 `execute: undefined`（会导致模型调用卡住） | ~~P2~~ |
@@ -729,7 +728,7 @@ export type ConflictRecord = {
 | 本地服务监听安全 | 纯本地单机部署，不应默认暴露所有网卡 | 已修复：`dev`/`start` 显式绑定 `127.0.0.1`；API middleware 允许 localhost、IPv4/IPv6 loopback 与端口，拒绝非本机 Host 并返回统一错误结构；跨 Origin 的本机工具调用保持可用 | ~~P0~~ |
 | 检索库与图谱路由语义 | `/memory` 应承担检索库职责，图谱应有唯一入口 | 已修复：`/memory` 提供列表、搜索、话题筛选、分页和详情/话题/图谱链接；`/memory/map` 统一由 `KnowledgeMap` + `MemoryMapViewport` 渲染，删除重复路由实现 | ~~P0~~ |
 | `/api/listen` 错误响应契约 | 错误应使用 `{ success:false, error:{ code, message } }` | 已修复：非法 JSON、Zod 校验、大小超限和内部异常统一使用 `apiError`；内部异常客户端消息稳定且详细信息仅写 logger；桥接脚本兼容对象错误 | ~~P1~~ |
-| 工程门禁与真实浏览器流程 | CI 仅覆盖 typecheck/lint/test/eval，缺少格式、覆盖率、构建和真实 E2E | 已修复：严格 Lint、Prettier、覆盖率阈值、production build、Playwright Chromium E2E 和隔离测试数据接入 CI；E2E 覆盖首页→聊天、检索库→详情、检索库→图谱、设置→工具监听和 listen 错误契约 | ~~P1~~ |
+| 工程门禁与真实浏览器流程 | CI 仅覆盖 typecheck/lint/test/eval，缺少格式、覆盖率、构建和真实 E2E | 已修复：严格 Lint、Prettier、死代码可达性、覆盖率阈值、production build、Playwright Chromium E2E 和隔离测试数据接入 CI；E2E 覆盖真实来源配置→扫描→审核→发布→检索→主题资料→来源追溯、幂等、移动端和已删除入口 | ~~P1~~ |
 | 写入质量闸门 fail-open | 第 4.8 节仅要求候选入队审计，无质量判定语义；旧实现为单一 LLM PASS/FAIL 且降级/异常/API 失败时直接放行 | 已修复：`QualityFilterService` 重写为三态判定（`accept ≥7 分` / `reject <4 分` / `review 4-6 分`），闸门不可用转 `review` 人工裁决而非放行（fail-closed）；`PendingEvent.status` 新增 `rejected`（终拒不重试）与 `review`（待人工，不进重试循环）；质量 FAIL 不再进重试循环 | ~~P0~~ |
 | 更新路径绕过质量闸门 | 旧实现仅新建记忆过质量闸门，update 事件 content 变更直接进审计 | 已修复：`Orchestrator` 更新分支在 `changedFields` 含 `content` 时同样执行向量去重 + 质量闸门（reject → rejected；review → warn 后继续审计 diff/冲突兜底） | ~~P1~~ |
 | 多入口写入无语义去重 | 旧实现仅 ingest 入口有 Jaccard 快筛，chat/listen/tool 等入口无语义去重 | 已修复：`Orchestrator` 统一入口向量语义去重（`VectorIndex.search` cosine ≥ 0.95 判重 → rejected）；一次 embedding 召回 top-K 相似记忆同时服务去重与闸门新颖性上下文（≥0.6 才注入 prompt，省 token） | ~~P1~~ |
@@ -739,6 +738,9 @@ export type ConflictRecord = {
 | 来源版本、块身份与正式知识关系缺失 | LKA-001 FR-004、FR-006、FR-014、FR-015 要求可追溯和增量处理 | 已修复：新增 `source_versions`、`source_chunks`、`source_memory_links`；语义块哈希支持仅噪声变化无操作，发布/人工接受后建立来源关系，旧证据尽可能迁移 | ~~P0~~ |
 | 主题学习资料尚未实现 | LKA-001 FR-013 至 FR-015 要求可阅读、可追溯且增量更新的主题资料 | 已修复：`StudyGuideBuilder` 以已接受知识确定性生成 `guides/{topic}.md`，可选模型只能调整标题和顺序；schema 拒绝非法引用，原子发布先验证临时文件，发布链路只刷新受影响主题 | ~~P0~~ |
 | Phase 7 UI 未承载完整知识循环 | 状态、来源、检索、资料与审核页面必须展示同一来源/事件/知识契约 | 已修复：状态页展示来源健康、版本、进度与分项降级；来源设置支持完整 CRUD 与扫描；搜索返回分数和命中通道；主题页读取 StudyGuide；审核支持来源对照、原因和编辑后接受；桌面/移动端 Playwright 验收通过 | ~~P0~~ |
+| 审核页丢失自动决策原因 | NFR-008 要求 review/reject 同时具有稳定代码和用户可读原因 | 已修复：`PendingEvent` 持久化 `decisionReasonCode` 与 `decisionReason`，KnowledgeAgent 将其写入进度事件，审核 API 优先返回同一契约；旧数据库自动增列 | ~~P0~~ |
+| 检索增强仅在测试中可达 | FR-016 要求可用时支持查询改写、图谱邻居和 MMR，旧生产搜索只调用单路 Retriever | 已修复：`/api/memory/search` 使用 `searchWithExpansionDetailed`，合并 Wikilink 邻居后执行 MMR，并保留关键词降级模式与命中通道 | ~~P0~~ |
+| 范围外维护与旧 UI 残留 | Phase 5 范围收缩后仍有不可达 UI、聊天式纠错、nightly 代码，自动 retention 还会绕过审计直接改写知识 | 已修复：Phase 8 删除 19 个范围外生产模块、2 个旧测试文件和 2 个无用依赖；`audit:dead-code` 遍历 160 个生产模块并接入 CI | ~~P0~~ |
 
 ### 11.2 渐进式路线图
 
@@ -795,7 +797,7 @@ Phase 4 — 测试与质量
 Phase 5 — 检索与质量收口 [DONE]
   [x] 多路召回（query-rewriter budget 改写 + query-expansion 合并去重，降级退回单路）
   [x] 注入改为 getMemoriesByIds 精确加载，移除 500 条全量拉取
-  [x] 记忆纠错闭环（MemoryCorrectionService + correct_memory 工具 + memory_update 意图路由 + 记错/纠正关键词）
+  [x] 历史记忆纠错闭环（聊天工具入口已随 LKA-001 收缩删除，Phase 8 清理无入口实现）
   [x] 检索评测集与指标（src/eval，Recall@k / MRR，npm run eval 出报告）
   [x] GitHub Actions CI（ubuntu + windows 基础检查；Ubuntu 独立 coverage/build/E2E job）
   [x] Prettier 格式门禁与 ESLint 0 warning
@@ -810,7 +812,7 @@ Phase 5 — 检索与质量收口 [DONE]
 
 ### 11.3 LKA-001 功能收缩路线图
 
-详细规范位于 `docs/specs/001-local-knowledge-agent/`。Phase 3 至 Phase 7 已完成；当前进入 Phase 8 验证和作品集交付。
+详细规范位于 `docs/specs/001-local-knowledge-agent/`。Phase 0 至 Phase 8 已完成，当前版本进入维护与演示状态。
 
 ```text
 Phase 0 — 确认范围和建立基线 [DONE]
@@ -863,6 +865,13 @@ Phase 7 — 用户界面重构 [DONE]
   [x] 审核工作台支持候选/来源对照、原因、接受、编辑和拒绝
   [x] 桌面与移动端响应式、语义标签、焦点和横向溢出验收
 Phase 8 — 验证和作品集交付
+  [x] 更新状态机、来源、主题资料、降级与结构化决策原因测试
+  [x] Playwright 覆盖来源配置、扫描、审核、发布、搜索、主题资料、追溯、幂等和移动端
+  [x] 检索评测扩充到含噪、同义词、主题过滤与近似重复场景，并设置分组阈值
+  [x] import 可达性审计接入 CI，删除不可达与范围外代码、测试和依赖
+  [x] README、依赖说明、贡献指南、架构图和 SDD 索引同步实现
+  [x] 提供确定性演示数据、五分钟讲解脚本和 Phase 8 验证报告
+  [x] 记录改造前后代码量、路由、依赖、覆盖率、检索、重复率和处理耗时
 ```
 
 ## 12. 本轮补充记录
@@ -875,6 +884,7 @@ Phase 8 — 验证和作品集交付
 - LKA-001 Phase 5 已完成：删除范围外聊天、会话、画像、Prompt、MCP/Skills 和浏览器采集运行时，首页改为知识处理概览；详细结果见 `docs/specs/001-local-knowledge-agent/phase-5-scope-removal.md`
 - LKA-001 Phase 6 已完成：新增带合法知识与来源版本引用的确定性主题资料生成、可选模型排序、原子发布和增量刷新；详细结果见 `docs/specs/001-local-knowledge-agent/phase-6-study-guides.md`
 - LKA-001 Phase 7 已完成：状态、来源、检索、资料阅读和审核界面统一到来源事件契约，并完成桌面/移动端可访问性验收；详细结果见 `docs/specs/001-local-knowledge-agent/phase-7-user-interface.md`
+- LKA-001 Phase 8 已完成：生产搜索接回查询改写、Wikilink 邻居与 MMR；审核决策原因持久化；真实来源到追溯 E2E、扩充检索评测、死代码门禁、最终文档、演示脚本和前后指标已交付；详细结果见 `docs/specs/001-local-knowledge-agent/phase-8-delivery.md`
 
 - 历史 ChatHandler 系统提示拆分已随 LKA-001 Phase 5 范围收缩删除
 - 已完成审计报告写入拆分：`src/server/services/audit-report-writer.ts`
@@ -888,11 +898,11 @@ Phase 8 — 验证和作品集交付
 - 已完成 WikiGraph 增量更新清理：文件变更/删除时移除旧节点关系，避免脏边残留
 - 已完成多路召回：`query-rewriter.ts`（budget 改写，降级退回空变体）+ `query-expansion.ts`（多路合并取最高相似度）
 - 已完成注入精确加载：`handler.ts retrieveRelevantMemories` 用 `getMemoriesByIds` 替代 `listMemories({limit:500})`
-- 已完成记忆纠错闭环：`src/lib/memory/correction.ts` + `correct_memory` 工具 + `memory_update` 意图接入纠错
+- 历史记忆纠错闭环已随 LKA-001 Phase 8 删除：聊天式调用入口在 Phase 5 已移除，继续保留独立实现只会形成不可达代码
 - 已完成检索评测：`src/eval/`（fixtures/metrics/retrieval-eval），Recall@k / MRR 回归基线 + 报告
 - 已完成 GitHub Actions CI：`.github/workflows/ci.yml`（typecheck + lint + test + eval，ubuntu/windows）
 - usearch 移至 `optionalDependencies`：CI 不装原生 usearch，向量检索走 JS 精确后端
-- 新增/更新测试：`chat-system-prompt.test.ts`、`audit-report-writer.test.ts`、`vector-backend.test.ts`、`provider-loader.test.ts`、`api-route-contracts.test.ts`、`conversation-compressor.test.ts`、`ai-config-form.test.tsx`、`query-rewriter.test.ts`、`query-expansion.test.ts`、`memory-correction.test.ts`、`eval-metrics.test.ts`、`retrieval-eval.test.ts`
+- 历史新增测试清单中的聊天、压缩和记忆纠错测试已随 LKA-001 范围收缩删除；当前保留 `audit-report-writer`、向量后端、提供商、API 契约、查询改写/扩展和检索评测测试
 - 已恢复聊天与多会话能力：`/chat`、`ChatInterface`、`useChatSession`、消息输入/展示/模式选择组件重新接入现有 Agent 事件流与 JSONL 会话 API；顶部导航按既有 UI 设计继续保持“首页 / 检索库 / 设置”三项，不展示对话入口
 - 已修复记忆浏览契约与路由语义：新增 `memory-api-client.ts` 统一消费 `data.items` / `data.results`；单条记忆使用 `/memory/[id]`，话题聚合使用 `/memory/topic/[topic]`
 - 新增回归测试：`memory-api-client.test.ts`、`chat-ui-restoration.test.tsx`
@@ -905,9 +915,9 @@ Phase 8 — 验证和作品集交付
 - 已完成全入口向量语义去重：`Orchestrator.recallSimilarMemories` 一次 embedding + `VectorIndex.search`，cosine ≥ 0.95 → `rejected`；`recallSimilarMemories` + `commitNewMemory` 抽取复用，更新路径 content 变更同样过闸门
 - 已完成人工裁决出口：`Orchestrator.resolveReviewEvent`（accept 跳闸门落盘防死循环 / reject 终拒）+ `/api/audit/review-events` 路由；`MemoryService` 新增 `getEvent` / `getEventsByStatus`
 - `PendingEvent.status` 扩展 `rejected` / `review`：终拒不重试，review 不被自动消费；`retryFailedEvents` 仅重置 `failed`
-- 已完成更新并入框架级融合：`MemoryCorrectionService` 改写 prompt 要求把新信息纳入记忆的知识框架（按主题逻辑归位重组、重复表述合并成更完整说法、读起来像一开始就是这么写的，禁止末尾追加孤立补充段、不遗漏原有信息、同步更新 summary）；`update_memory` 工具描述同步引导模型框架级融合 content
+- 历史 `MemoryCorrectionService` 的框架级融合与追加式校验已随无入口模块一并删除；正式知识更新继续通过审核工作台编辑和冲突裁决完成
 - 已完成融合硬校验（非提示词的程序化保障）：`isAppendLikeRewrite` 结构判定——改写结果归一化空白后若以原文为严格前缀（且确有改动）即判为"末尾追加式"，拒绝并注入 `APPEND_REJECT_FEEDBACK` 重试一次，仍追加则改写失败不入队；改错字等开头重组场景不误判
-- 新增/更新测试：`quality-filter-service.test.ts`（10 用例三态协议）、`orchestrator.test.ts`（reject/review/去重/提示注入/resolveReviewEvent）、`memory-correction.test.ts`（框架级融合 prompt 契约 + 追加式硬校验）、`api-route-contracts.test.ts` 登记 review-events 路由
+- 新增/更新测试：`quality-filter-service.test.ts`、`orchestrator.test.ts` 与 `api-route-contracts.test.ts` 覆盖三态质量协议、结构化决策原因和 review-events 路由
 - 当前测试总量：44 个测试文件，429 passed / 0 skipped（共 429 用例）
 - 已修复知识地图三症状：①清理库内 5 条写入时编码丢失（中文全 `?`）的测试脏数据（memories/vector_records 归零）；②topic 页对已解码路由参数二次 `decodeURIComponent` 遇裸 `%` 抛 URIError 致知识点打不开，已去掉二次解码并新增 loadError + 重试按钮（不再吞错误）；③悬停乱码为库内坏数据非渲染问题，另修复 `KnowledgeMap` label 首字符大写与超长截断的代理对安全问题（`Array.from` 按码点处理）
 - 已按用户期望重构 `/memory/topic/[topic]` 布局为"左目录右阅读"：左栏"← 退出到上一级"（/memory/map）+ 文章目录（序号徽章、单篇删除）+ 底部统计；右侧单篇阅读视图（标题/分类/标签/正文、删除本文、上一篇/下一篇切换）

@@ -1,51 +1,26 @@
-# 项目依赖说明
+# 依赖说明
 
-## 运行时依赖 (dependencies)
+## 运行依赖
 
-| 包名 | 版本 | 用途 |
-|------|------|------|
-| `next` | ^14.0.0 | React 全栈框架，提供路由、SSR、API 路由 |
-| `react` | ^18.2.0 | 前端 UI 组件库 |
-| `react-dom` | ^18.2.0 | React DOM 渲染器 |
-| `ai` | ^7.0.34 | Vercel AI SDK，提供流式 AI 对话和多模型适配 |
-| `@ai-sdk/openai` | ^4.0.17 | OpenAI / OpenAI-compatible API 适配器 |
-| `@ai-sdk/anthropic` | ^4.0.18 | Anthropic Claude API 适配器 |
-| `better-sqlite3` | ^12.11.1 | 本地 SQLite 数据库（向量存储、事件队列） |
-| `chokidar` | ^5.0.0 | 文件系统监听（实时检测文件变更） |
-| `clsx` | ^2.1.1 | className 条件拼接工具 |
-| `tailwind-merge` | ^3.6.0 | Tailwind CSS 类名合并去重 |
-| `framer-motion` | ^12.42.2 | React 动画库（UI 动效） |
-| `typescript` | ^5.3.2 | TypeScript 语言 |
-| `zod` | ^4.4.3 | Schema 声明与数据校验 |
-| `@types/node` | ^20.10.0 | Node.js 类型声明 |
-| `@types/react` | ^18.2.40 | React 类型声明 |
-| `@types/react-dom` | ^18.2.17 | ReactDOM 类型声明 |
+| 包 | 职责 |
+| --- | --- |
+| `next`, `react`, `react-dom` | 本地状态、来源、审核、检索与阅读界面 |
+| `ai` | 非流式结构化生成与 Embedding 调用 |
+| `@ai-sdk/openai`, `@ai-sdk/anthropic` | 声明式模型提供商适配 |
+| `better-sqlite3` | 来源版本、队列、冲突、配置和向量真源 |
+| `chokidar` | Markdown、文本和开发工具目录监听 |
+| `zod` | API、来源、主题资料和模型输出校验 |
+| `typescript` 与 React/Node 类型包 | TypeScript 编译及类型契约 |
 
-## 开发依赖 (devDependencies)
+`usearch` 是可选依赖：可用时提供 HNSW ANN；不可用、损坏或版本不一致时系统使用 JavaScript 精确余弦后端。
 
-| 包名 | 版本 | 用途 |
-|------|------|------|
-| `eslint` | ^10.8.0 | 代码静态分析与规范检查 |
-| `eslint-config-next` | ^16.2.12 | Next.js 项目的 ESLint 推荐规则 |
-| `eslint-config-prettier` | ^10.1.8 | 关闭 ESLint 中与 Prettier 冲突的规则 |
-| `@eslint/js` | ^10.0.1 | ESLint 内置推荐规则 |
-| `typescript-eslint` | ^8.65.0 | TypeScript ESLint 插件 |
-| `@next/eslint-plugin-next` | ^16.2.12 | Next.js ESLint 插件 |
-| `prettier` | ^3.9.6 | 代码格式化工具 |
-| `tailwindcss` | ^3.3.6 | 原子化 CSS 框架 |
-| `autoprefixer` | ^10.4.16 | CSS 自动添加浏览器前缀 |
-| `postcss` | ^8.4.32 | CSS 处理工具（Tailwind CSS 依赖） |
-| `@types/better-sqlite3` | ^7.6.13 | better-sqlite3 类型声明 |
+## 开发依赖
 
-## 安装与更新
+Vitest 与 V8 coverage 负责单元、集成和覆盖率门禁；Playwright 负责真实 Chromium 主流程；ESLint、Prettier 与 TypeScript 负责静态门禁；Tailwind CSS、PostCSS 和 Autoprefixer 负责样式构建。
 
-```bash
-# 安装所有依赖
-npm install
+## 依赖边界
 
-# 添加新的生产依赖
-npm install <package-name>
-
-# 添加新的开发依赖
-npm install --save-dev <package-name>
-```
+- 核心 `src/features/` 与 `src/lib/` 不得引入 React 或 Next.js Route Handler。
+- 生产依赖必须能从运行时入口到达；`npm run audit:dead-code` 检查本地模块可达性。
+- 原生 `usearch` 不得成为 CI 和关键词降级的硬依赖。
+- 新提供商优先通过 `src/config/providers.json` 注册，不为单个端点增加业务分支。
