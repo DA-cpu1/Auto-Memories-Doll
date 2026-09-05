@@ -1,7 +1,23 @@
+import { z } from "zod";
+import { codexDialogueDiagnosticsSchema } from "../types/codex-dialogue";
+
+export const listenStatusAgentSchema = z.object({
+  sources: z.array(
+    z
+      .object({
+        sourceId: z.string(),
+        dialogue: codexDialogueDiagnosticsSchema.optional(),
+      })
+      .passthrough(),
+  ),
+  progress: z.array(z.unknown()),
+});
+
 export type ApiRouteContract = {
   requestSchema?: string;
   responseSchema: string;
   errorCodes: readonly string[];
+  statusAgentSchema?: string;
 };
 
 export const apiRouteContracts: Record<string, ApiRouteContract> = {
@@ -59,6 +75,7 @@ export const apiRouteContracts: Record<string, ApiRouteContract> = {
     errorCodes: ["VALIDATION_FAILED", "INGEST_FAILED", "INTERNAL_ERROR"],
   },
   "src/app/api/listen/route.ts": {
+    statusAgentSchema: "listenStatusAgentSchema",
     requestSchema: "listenRequestSchema",
     responseSchema: "listenResponseSchema",
     errorCodes: ["VALIDATION_FAILED", "INVALID_JSON", "INTERNAL_ERROR"],

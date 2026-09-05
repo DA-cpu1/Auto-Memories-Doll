@@ -15,6 +15,7 @@ export type NormalizationReport = {
   inputCharacters: number;
   outputCharacters: number;
   removedNoise: RemovedNoise[];
+  dialogue?: import("./codex-dialogue").CodexDialogueDiagnostics;
 };
 
 export type NormalizationResult = {

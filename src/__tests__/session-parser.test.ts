@@ -62,3 +62,29 @@ describe("parseSession toolType=trae", () => {
     expect(parsed?.messageCount).toBe(0);
   });
 });
+
+describe("other tool compatibility", () => {
+  it("preserves Claude Code, Cursor, Markdown and Text parsing", async () => {
+    const claude = await parseSession(
+      "claude.jsonl",
+      "claude-code",
+      JSON.stringify({
+        type: "assistant",
+        message: { role: "assistant", content: [{ type: "text", text: "Claude content" }] },
+      }),
+    );
+    const cursor = await parseSession(
+      "cursor.json",
+      "cursor",
+      JSON.stringify({ messages: [{ role: "user", content: "Cursor content" }] }),
+    );
+    const markdown = await parseSession("note.md", "markdown", "# Note\n\nMarkdown content");
+    const text = await parseSession("note.txt", "text", "Plain text content");
+    expect(claude?.content).toContain("Claude content");
+    expect(cursor?.content).toContain("Cursor content");
+    expect(markdown?.title).toBe("Note");
+    expect(text?.content).toBe("Plain text content");
+    for (const result of [claude, cursor, markdown, text])
+      expect(result?.diagnostics).toBeUndefined();
+  });
+});

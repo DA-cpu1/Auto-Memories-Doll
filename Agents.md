@@ -687,6 +687,7 @@ export type ConflictRecord = {
 
 | 偏差项 | AGENTS.md 描述 | 实际代码 | 优先级 |
 |--------|---------------|---------|--------|
+| Codex 采集包含非最终对话事件 | [LKA-002](docs/specs/002-codex-final-dialogue/spec.md) 要求只采集真实用户输入与每轮 AI 最终回答 | 已修复（LKA-002）：独立 schema 白名单、消息身份去重、未完成轮次等待、同字节快照、噪声无操作及来源诊断已接入；439 条单元/集成测试与 5 条 E2E 通过。旧数据不自动清洗，见交付报告 | ~~P1~~ |
 | 队列存储路径 | `src/lib/storage/queue.ts`（第 4.6 节旧版描述） | 已修复：删除 `src/features/audit/queue.ts`（内存 Map），Auditor 统一使用 MemoryService SQLite 队列；dequeueEvent 事务化（悲观锁） | ~~P1~~ |
 | 图谱存储方式 | 第 4.6 节仅描述 `graph_edges` SQLite 表 | 已修复：删除 `manager.ts` 和 `query.ts`，唯一路径为 `wiki-graph.ts` | ~~P2~~ |
 | sortBy 参数 | 无约束 | 已修复：`SORTABLE_FIELDS` Set 白名单 | ~~P1~~ |
@@ -875,6 +876,19 @@ Phase 8 — 验证和作品集交付
 ```
 
 ## 12. 本轮补充记录
+
+### LKA-002 后续路线图（已完成）
+
+规范入口：[Codex 仅采集用户输入与最终回答](docs/specs/002-codex-final-dialogue/spec.md)。LKA-001 的历史阶段状态不等同于此增量功能已实现。
+
+- [x] 新 Spec 编写前提交现有 11 份文档：`f2d9522`，既有代码改动仍在工作区。
+- [x] 编写 LKA-002 需求、设计和实施清单。
+- [x] 建立 CLI/桌面端格式 fixture 和最终消息白名单。
+- [x] 实现真实用户消息筛选、最终阶段判定、轮次等待及镜像去重。
+- [x] 接入知识循环、噪声追加无操作、最小诊断与来源显示名。
+- [x] 完成全链路验收与门禁，记录旧数据不自动清洗的发布边界，详见 [LKA-002 交付报告](docs/specs/002-codex-final-dialogue/delivery.md)。
+
+### LKA-001 及此前记录
 
 - LKA-001 Phase 0 已完成：规范确认、Git 基线、代码规模报告、移动端 hydration 竞争修复、图谱 E2E 更新和全门禁验证；详细结果见 `docs/specs/001-local-knowledge-agent/phase-0-baseline.md`
 - LKA-001 Phase 1 已完成：新增 13 条真实存储特征测试，并修复抽取卡覆盖原始 `sourceHash` 导致未变化文件重复入队的问题；详细结果见 `docs/specs/001-local-knowledge-agent/phase-1-characterization.md`

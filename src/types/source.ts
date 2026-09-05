@@ -26,6 +26,7 @@ export type SourceDocument = {
   lastError?: string;
   createdAt: string;
   updatedAt: string;
+  dialogue?: import("./codex-dialogue").CodexDialogueDiagnostics;
 };
 
 export type SourceVersion = {

@@ -27,7 +27,7 @@ const EMPTY_FORM: FormValue = {
   description: "",
 };
 const TOOL_LABELS: Record<ToolType, string> = {
-  codex: "Codex CLI",
+  codex: "Codex（CLI / 桌面端）",
   "claude-code": "Claude Code",
   cursor: "Cursor",
   trae: "Trae",

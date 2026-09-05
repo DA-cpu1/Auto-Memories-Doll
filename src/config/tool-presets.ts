@@ -11,7 +11,7 @@ export const TOOL_PRESETS: Record<
   { name: string; toolType: ToolType; path: string; filePattern: string }
 > = {
   codex: {
-    name: "Codex CLI",
+    name: "Codex（CLI / 桌面端）",
     toolType: "codex",
     path: "~/.codex/sessions",
     filePattern: "*.jsonl",

@@ -65,7 +65,10 @@ function describeCause(err: Error & { cause?: unknown }): string {
   while (current && depth < 3) {
     if (typeof current === "object" && current !== null) {
       const c = current as { code?: string; message?: string; name?: string };
-      const label = c.code && c.message ? `${c.code} ${c.message}` : c.code || c.message || c.name || String(current);
+      const label =
+        c.code && c.message
+          ? `${c.code} ${c.message}`
+          : c.code || c.message || c.name || String(current);
       causes.push(label);
       current = (current as { cause?: unknown }).cause;
     } else {

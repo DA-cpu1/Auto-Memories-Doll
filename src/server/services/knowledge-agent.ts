@@ -11,7 +11,7 @@ import { buildMemoryRecord } from "../../lib/memory/builder";
 import { validateMemoryRecord } from "../../lib/memory/validator";
 import { getDatabase } from "../../lib/storage/database";
 import { parseMemoryFromText } from "../../lib/storage/markdown-parser";
-import { parseSourceRevisionEvent } from "../../lib/source/source-revision";
+import { createSourceRevision, parseSourceRevisionEvent } from "../../lib/source/source-revision";
 import { parseSession, ParsedSession } from "../../lib/tools/session-parser";
 import { logger } from "../../lib/logger";
 import { KnowledgeModelAdapter } from "../../lib/ai/knowledge-model-adapter";
@@ -223,7 +223,13 @@ export class KnowledgeAgent {
   }
 
   listSources(): SourceDocument[] {
-    return this.sourceRegistry.listSources();
+    return this.sourceRegistry.listSources().map((source) => ({
+      ...source,
+      dialogue: source.latestRevision
+        ? this.sourceRegistry.getVersion(source.sourceId, source.latestRevision)
+            ?.normalizationReport.dialogue
+        : undefined,
+    }));
   }
 
   recoverInterruptedEvents(): number {
@@ -668,8 +674,13 @@ export class KnowledgeAgent {
       };
     }
     if (!input.toolSource) throw new Error(`来源类型 ${event.sourceType} 缺少工具来源配置`);
-    const session = await parseSession(sourcePath, input.toolSource.toolType);
-    if (!session || session.messageCount === 0) {
+    const bytes = input.content ?? (await readFile(sourcePath));
+    if (input.content === undefined && createSourceRevision(bytes) !== event.revision) {
+      throw new Error("来源文件版本已变化，等待重新扫描");
+    }
+    const snapshot = bytes.toString();
+    const session = await parseSession(sourcePath, input.toolSource.toolType, snapshot);
+    if (!session) {
       return {
         kind: "tool",
         content: "",
@@ -685,9 +696,11 @@ export class KnowledgeAgent {
         source: input.toolSource,
       };
     }
+    const content = limitSessionContent(session.content);
+    if (session.diagnostics) session.diagnostics.truncated = content !== session.content;
     return {
       kind: "tool",
-      content: limitSessionContent(session.content),
+      content,
       locator: sourcePath,
       session,
       source: input.toolSource,
@@ -733,8 +746,25 @@ export class KnowledgeAgent {
       };
     }
     if (parsed.kind === "tool") {
-      const normalized = normalizeTextWithReport(parsed.content);
-      const chunks = splitSemanticText(normalized.content, { sourceId: event.sourceId });
+      // Codex has already selected message identities; generic deduplication would
+      // erase repeated real turns and keyword filtering would alter quoted code.
+      const normalized = parsed.session.diagnostics
+        ? {
+            content: parsed.content,
+            report: {
+              inputCharacters: parsed.content.length,
+              outputCharacters: parsed.content.length,
+              removedNoise: [],
+              dialogue: parsed.session.diagnostics,
+            } satisfies NormalizationReport,
+          }
+        : normalizeTextWithReport(parsed.content);
+      const chunks = splitSemanticText(normalized.content, { sourceId: event.sourceId }).map(
+        (chunk) =>
+          parsed.session.diagnostics
+            ? { ...chunk, chunkId: `${chunk.chunkId}-${chunk.ordinal}` }
+            : chunk,
+      );
       const result = this.normalizeToolSession(
         event,
         { ...parsed, content: normalized.content },
@@ -823,9 +853,9 @@ export class KnowledgeAgent {
     const topic = parsed.source.topic || defaultTopicForTool(parsed.source.toolType);
     const tags = [parsed.source.toolType, "tool-session"];
     if (parsed.source.topic) tags.push(parsed.source.topic);
-    const knowledgeLog = buildKnowledgeLogFromText(parsed.content, {
-      source: parsed.source.name,
-    });
+    const knowledgeLog = parsed.session.diagnostics
+      ? { content: parsed.content, summary: parsed.session.title }
+      : buildKnowledgeLogFromText(parsed.content, { source: parsed.source.name });
     const record = buildMemoryRecord(
       `${parsed.source.name}:${parsed.locator}`,
       "ingest",

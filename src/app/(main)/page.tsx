@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
 import type { FormEvent } from "react";
+import type { CodexDialogueDiagnostics } from "@/types/codex-dialogue";
 import { useRouter } from "next/navigation";
 import { memoryDetailHref, searchMemoriesClient } from "@/lib/memory-api-client";
 
@@ -29,6 +30,7 @@ type SourceStatus = {
       lastObservedAt?: string;
       lastProcessedAt?: string;
       lastError?: string;
+      dialogue?: CodexDialogueDiagnostics;
     }>;
     progress?: Array<{
       progressId: string;
@@ -68,6 +70,14 @@ const STAGE_LABELS: Record<string, string> = {
   review: "待审核",
   rejected: "已拒绝",
   failed_retryable: "等待重试",
+};
+
+const DIALOGUE_LABELS: Record<CodexDialogueDiagnostics["reasons"][number], string> = {
+  no_final_answer: "等待最终回答",
+  no_dialogue: "只有非对话事件",
+  unsupported_format: "不支持的会话格式",
+  orphan_final: "最终回答缺少用户输入",
+  ambiguous_turn: "轮次关联不明确",
 };
 
 export default function DashboardPage() {
@@ -173,7 +183,7 @@ export default function DashboardPage() {
         </div>
       ) : null}
 
-      <div className="mt-6 grid gap-6 lg:grid-cols-[minmax(0,1.45fr)_minmax(280px,0.75fr)]">
+      <div className="mt-6 grid grid-cols-1 gap-6 lg:grid-cols-[minmax(0,1.45fr)_minmax(280px,0.75fr)]">
         <section className="rounded-lg border border-[#E0D6C7] bg-[#FFFDF9] p-5 sm:p-6">
           <div className="mb-5 flex items-center justify-between gap-4">
             <h2 className="text-base font-semibold text-[#3E3224]">快速检索</h2>
@@ -322,6 +332,15 @@ export default function DashboardPage() {
                         : "尚未处理"}
                       {source.lastError ? (
                         <p className="mt-1 max-w-xs text-[#A14C37]">{source.lastError}</p>
+                      ) : null}
+                      {source.dialogue ? (
+                        <p className="mt-1 max-w-xs text-[#6F604B]">
+                          已采集 {source.dialogue.completedTurns} 轮对话
+                          {source.dialogue.reasons
+                            .map((reason) => ` · ${DIALOGUE_LABELS[reason]}`)
+                            .join("")}
+                          {source.dialogue.truncated ? " · 对话已截断" : ""}
+                        </p>
                       ) : null}
                     </td>
                   </tr>

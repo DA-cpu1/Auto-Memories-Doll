@@ -1,6 +1,8 @@
 import { promises as fs } from "fs";
 import { basename, extname } from "path";
 import { ToolType } from "../../types/config";
+import { parseCodexDialogue } from "./codex-dialogue";
+import type { CodexDialogueDiagnostics } from "../../types/codex-dialogue";
 
 /**
  * 解析后的工具会话。
@@ -19,6 +21,7 @@ export type ParsedSession = {
   timestamp: string;
   /** 消息条数 */
   messageCount: number;
+  diagnostics?: CodexDialogueDiagnostics;
 };
 
 type RawMessage = { role: string; content: string };
@@ -102,22 +105,7 @@ function extractRole(obj: unknown): string {
  * ~/.codex/sessions/ 下的 jsonl 文件，每行一个 JSON 事件。
  */
 async function parseCodex(fileContent: string, filePath: string): Promise<ParsedSession> {
-  const messages: RawMessage[] = [];
-  const lines = fileContent.split("\n");
-
-  for (const line of lines) {
-    const obj = tryParseJson(line);
-    if (!obj || typeof obj !== "object") continue;
-
-    const o = obj as Record<string, unknown>;
-    // codex 事件格式: {type: "message"|"response"|"function_call", payload: {...}}
-    // 也兼容 {role, content} 直接格式
-    const role = extractRole(o.payload || o);
-    const content = extractContent(o.payload || o);
-    if (content.trim()) {
-      messages.push({ role, content });
-    }
-  }
+  const { messages, diagnostics } = parseCodexDialogue(fileContent);
 
   const title = extractTitle(messages, basename(filePath, extname(filePath)));
   return {
@@ -127,6 +115,7 @@ async function parseCodex(fileContent: string, filePath: string): Promise<Parsed
     sourceFile: filePath,
     timestamp: new Date().toISOString(),
     messageCount: messages.length,
+    diagnostics,
   };
 }
 
@@ -291,10 +280,11 @@ async function parseText(fileContent: string, filePath: string): Promise<ParsedS
 export async function parseSession(
   filePath: string,
   toolType: ToolType,
+  snapshot?: string,
 ): Promise<ParsedSession | null> {
   let content: string;
   try {
-    content = await fs.readFile(filePath, "utf-8");
+    content = snapshot ?? (await fs.readFile(filePath, "utf-8"));
   } catch {
     return null;
   }

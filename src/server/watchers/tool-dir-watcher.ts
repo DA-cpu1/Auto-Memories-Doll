@@ -214,6 +214,7 @@ async function handleFileEvent(
         event: sourceEvent,
         sourceLocator: filePath,
         toolSource: source,
+        content: rawContent.toString("utf-8"),
       });
       logger.ingest.info(`[ToolDirWatcher] 来源版本处理完成`, {
         source: source.name,
@@ -226,6 +227,7 @@ async function handleFileEvent(
       agent.close();
     }
   } catch (error) {
+    processedFiles.delete(key);
     logger.ingest.error(`[ToolDirWatcher] 解析文件失败: ${filePath}`, {
       error: (error as Error).message,
     });

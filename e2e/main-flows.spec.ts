@@ -1,5 +1,7 @@
 import { expect, test, type APIRequestContext, type Page } from "@playwright/test";
 import { resolve } from "node:path";
+import { writeFileSync } from "node:fs";
+import { final, jsonl, meta, noise, start, user } from "../src/__tests__/fixtures/codex-dialogue";
 
 const SOURCE_TITLE = "可观察的 KnowledgeAgent 循环";
 const SOURCE_NAME = "Phase 8 演示来源";
@@ -111,8 +113,9 @@ test("未变化来源重复扫描不产生副本", async ({ page, request }) => 
 test("手机端主页面无横向溢出且可访问已发布知识", async ({ page }) => {
   const diagnostics = collectBrowserDiagnostics(page);
   await page.setViewportSize({ width: 390, height: 844 });
-
   await page.goto("/");
+  const searchBounds = await page.getByRole("button", { name: "检索", exact: true }).boundingBox();
+  expect(searchBounds!.x + searchBounds!.width).toBeLessThanOrEqual(390);
   const pageMetrics = await page.evaluate(() => ({
     viewportWidth: document.documentElement.clientWidth,
     pageWidth: document.documentElement.scrollWidth,
@@ -140,4 +143,52 @@ test("已删除产品入口不可访问且 listen 非法请求保持结构化错
     success: false,
     error: { code: "INVALID_JSON", message: "请求体不是有效 JSON" },
   });
+});
+
+test("Codex 来源显示等待与未知格式，最终回答到达后可审核发布", async ({
+  page,
+  request,
+}, testInfo) => {
+  const diagnostics = collectBrowserDiagnostics(page);
+  const file = resolve(SOURCE_PATH, "codex-waiting.jsonl");
+  const prefix = jsonl(meta, start(), user("Codex 最终对话验收"), ...noise);
+  writeFileSync(file, prefix);
+  writeFileSync(resolve(SOURCE_PATH, "codex-unknown.jsonl"), jsonl({ unsupported: true }));
+  const created = await request.post("/api/config/tool-sources", {
+    data: {
+      name: "我的 Codex 来源",
+      toolType: "codex",
+      path: SOURCE_PATH,
+      filePattern: "*.jsonl",
+      enabled: true,
+    },
+  });
+  expect(created.ok()).toBe(true);
+  await request.post("/api/listen/scan");
+  await page.goto("/settings/tools");
+  await expect(page.getByText("Codex（CLI / 桌面端）", { exact: true }).first()).toBeVisible();
+  await expect(page.getByRole("heading", { name: "我的 Codex 来源" })).toBeVisible();
+  await page.goto("/");
+  await expect(page.getByText("等待最终回答", { exact: false })).toBeVisible();
+  await expect(page.getByText("不支持的会话格式", { exact: false })).toBeVisible();
+  await page.screenshot({ path: testInfo.outputPath("codex-desktop.png"), fullPage: true });
+  await page.setViewportSize({ width: 390, height: 844 });
+  expect(
+    await page.evaluate(
+      () => document.documentElement.scrollWidth <= document.documentElement.clientWidth,
+    ),
+  ).toBe(true);
+  await page.screenshot({ path: testInfo.outputPath("codex-mobile.png"), fullPage: true });
+  const before = await request.get("/api/audit/review-events");
+  expect((await before.json()).items).toHaveLength(0);
+  writeFileSync(file, prefix + jsonl(final("只归档真实问题与最终回答。")));
+  await request.post("/api/listen/scan");
+  await replayQueue(request);
+  await page.goto("/audit");
+  await expect(page.getByRole("heading", { name: "Codex 最终对话验收" })).toBeVisible();
+  await page.getByRole("button", { name: "接受候选" }).click();
+  await expect(page.getByText("没有等待裁决的候选。")).toBeVisible();
+  await page.goto("/memory");
+  await expect(page.getByRole("link", { name: "查看记忆：Codex 最终对话验收" })).toBeVisible();
+  expect(diagnostics).toEqual([]);
 });

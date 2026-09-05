@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
+import { listenStatusAgentSchema } from "../../../config/api-route-contracts";
 import { KnowledgeAgent } from "../../../server/services/knowledge-agent";
 import { ListenStatsService } from "../../../server/services/listen-stats-service";
 import { getNotePath } from "../../../lib/storage/path-resolver";
@@ -182,7 +183,7 @@ export async function GET() {
     status: "listening",
     uptime: process.uptime(),
     stats,
-    agent: { sources, progress },
+    agent: listenStatusAgentSchema.parse({ sources, progress }),
     watchers: {
       fileWatcher: getFileWatcherStatus(),
       toolSources: getActiveSources(),
