@@ -1,60 +1,22 @@
-import Database from "better-sqlite3";
-import { mkdirSync, rmSync } from "node:fs";
+import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 
 const memoryRoot = resolve(process.cwd(), "e2e/.tmp/memory-root");
+const sourceRoot = resolve(process.cwd(), "e2e/.tmp/source");
 rmSync(memoryRoot, { recursive: true, force: true });
+rmSync(sourceRoot, { recursive: true, force: true });
 mkdirSync(memoryRoot, { recursive: true });
+mkdirSync(sourceRoot, { recursive: true });
 
-const database = new Database(join(memoryRoot, "memory.db"));
-database.exec(`
-  CREATE TABLE IF NOT EXISTS memories (
-    id TEXT PRIMARY KEY,
-    version INTEGER,
-    source TEXT,
-    sourceType TEXT,
-    title TEXT,
-    titleZh TEXT,
-    content TEXT,
-    summary TEXT,
-    summaryZh TEXT,
-    tags TEXT,
-    tagsZh TEXT,
-    topic TEXT DEFAULT 'uncategorized',
-    topicZh TEXT,
-    createdAt TEXT,
-    updatedAt TEXT,
-    accessedAt TEXT,
-    accessCount INTEGER,
-    heatScore REAL,
-    vectorId TEXT,
-    graphLinks TEXT
-  )
-`);
-
-database
-  .prepare(`
-    INSERT INTO memories (
-      id, version, source, sourceType, title, content, summary, tags, topic,
-      createdAt, updatedAt, accessedAt, accessCount, heatScore, graphLinks
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-  `)
-  .run(
-    "e2e-memory-1",
-    1,
-    "playwright",
-    "manual",
-    "E2E 测试记忆",
-    "这是一条只存在于隔离测试 memory root 中的记忆。",
-    "用于验证检索库、详情页和知识图谱的浏览器流程。",
-    JSON.stringify(["e2e", "playwright"]),
-    "ai-coding",
-    "2026-08-28T00:00:00.000Z",
-    "2026-08-28T00:00:00.000Z",
-    "2026-08-28T00:00:00.000Z",
-    0,
-    0,
-    JSON.stringify([]),
-  );
-
-database.close();
+writeFileSync(
+  join(sourceRoot, "observable-agent-loop.md"),
+  [
+    "# 可观察的 KnowledgeAgent 循环",
+    "",
+    "来源文件先生成稳定 revision，再经过解析、去噪、分块和候选入队。",
+    "模型不可用时质量判断必须 fail-closed 转入人工审核，不能直接发布。",
+    "人工接受后，系统沿用同一 memoryId 写入 Markdown，并刷新关键词索引、向量索引和主题学习资料。",
+    "主题资料中的每一节都保留知识 ID 与来源版本，便于追溯和重建。",
+  ].join("\n"),
+  "utf-8",
+);

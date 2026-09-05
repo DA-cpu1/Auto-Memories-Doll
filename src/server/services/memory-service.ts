@@ -86,11 +86,20 @@ export class MemoryService {
         changedFields TEXT,
         createdAt TEXT,
         status TEXT,
-        retryCount INTEGER
+        retryCount INTEGER,
+        decisionReasonCode TEXT,
+        decisionReason TEXT
       )
     `);
     // 迁移：旧数据库的 pending_events 可能缺少来源版本关联列。
-    for (const column of ["eventType", "sourceEventId", "sourceId", "sourceRevision"]) {
+    for (const column of [
+      "eventType",
+      "sourceEventId",
+      "sourceId",
+      "sourceRevision",
+      "decisionReasonCode",
+      "decisionReason",
+    ]) {
       try {
         this.db.exec(`ALTER TABLE pending_events ADD COLUMN ${column} TEXT`);
       } catch {
@@ -530,8 +539,9 @@ export class MemoryService {
     const stmt = this.db.prepare(`
       INSERT INTO pending_events (
         eventId, memoryId, sourceEventId, sourceId, sourceRevision,
-        sourceType, eventType, candidate, changedFields, createdAt, status, retryCount
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        sourceType, eventType, candidate, changedFields, createdAt, status, retryCount,
+        decisionReasonCode, decisionReason
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `);
     stmt.run(
       event.eventId,
@@ -546,6 +556,8 @@ export class MemoryService {
       event.createdAt,
       event.status,
       event.retryCount,
+      event.decisionReasonCode ?? null,
+      event.decisionReason ?? null,
     );
   }
 
@@ -584,6 +596,8 @@ export class MemoryService {
         createdAt: row.createdAt,
         status: "processing" as PendingEvent["status"],
         retryCount: row.retryCount,
+        decisionReasonCode: row.decisionReasonCode || undefined,
+        decisionReason: row.decisionReason || undefined,
       };
     });
 
@@ -624,6 +638,8 @@ export class MemoryService {
         createdAt: row.createdAt,
         status: "processing" as PendingEvent["status"],
         retryCount: row.retryCount,
+        decisionReasonCode: row.decisionReasonCode || undefined,
+        decisionReason: row.decisionReason || undefined,
       };
     });
 
@@ -637,9 +653,17 @@ export class MemoryService {
     if (!current) return;
     assertPendingEventStatusTransition(current.status, event.status);
     const stmt = this.db.prepare(`
-      UPDATE pending_events SET status = ?, retryCount = ? WHERE eventId = ?
+      UPDATE pending_events
+      SET status = ?, retryCount = ?, decisionReasonCode = ?, decisionReason = ?
+      WHERE eventId = ?
     `);
-    stmt.run(event.status, event.retryCount, event.eventId);
+    stmt.run(
+      event.status,
+      event.retryCount,
+      event.decisionReasonCode ?? null,
+      event.decisionReason ?? null,
+      event.eventId,
+    );
   }
 
   updateEventCandidate(eventId: string, candidate: MemoryRecord, changedFields: string[]): void {
@@ -675,6 +699,8 @@ export class MemoryService {
       createdAt: row.createdAt,
       status: row.status as PendingEvent["status"],
       retryCount: row.retryCount,
+      decisionReasonCode: row.decisionReasonCode || undefined,
+      decisionReason: row.decisionReason || undefined,
     }));
   }
 
@@ -752,6 +778,8 @@ export class MemoryService {
       createdAt: row.createdAt,
       status: row.status as PendingEvent["status"],
       retryCount: row.retryCount,
+      decisionReasonCode: row.decisionReasonCode || undefined,
+      decisionReason: row.decisionReason || undefined,
     };
   }
 
@@ -782,6 +810,8 @@ export class MemoryService {
       createdAt: row.createdAt,
       status: row.status as PendingEvent["status"],
       retryCount: row.retryCount,
+      decisionReasonCode: row.decisionReasonCode || undefined,
+      decisionReason: row.decisionReason || undefined,
     }));
   }
 

@@ -87,9 +87,17 @@ export class KnowledgeModelAdapter {
 
   static async generate(prompt: string, modelType: ModelType): Promise<LlmResponse> {
     const config = getKnowledgeAiConfig();
-    this.rememberApiKeyStatus(config.apiKey);
     const slot: ModelSlot = modelType;
     const tier = config[slot] || config.standard;
+    if (!this.rememberApiKeyStatus(config.apiKey)) {
+      this.llmDegraded = true;
+      return {
+        content: this.getFallbackResponse(),
+        finishReason: "degraded",
+        model: tier.model,
+        timestamp: getCurrentTime(),
+      };
+    }
 
     const safePrompt = redactSecrets(prompt).content;
     try {

@@ -25,8 +25,8 @@ export async function GET() {
         retryCount: event.retryCount,
         sourceId: event.sourceId,
         sourceRevision: event.sourceRevision,
-        reasonCode: progress?.errorCode ?? "manual_review",
-        reason: progress?.error ?? "质量闸门要求人工确认",
+        reasonCode: event.decisionReasonCode ?? progress?.errorCode ?? "MANUAL_REVIEW",
+        reason: event.decisionReason ?? progress?.error ?? "质量闸门要求人工确认",
         candidate: candidate
           ? {
               title: candidate.title,

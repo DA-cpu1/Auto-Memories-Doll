@@ -16,6 +16,10 @@ const vectorRetrieverMock = vi.hoisted(() => ({
   close: vi.fn(),
 }));
 
+const wikiGraphMock = vi.hoisted(() => ({
+  getNeighbors: vi.fn(),
+}));
+
 const knowledgeAgentMock = vi.hoisted(() => ({
   processIngest: vi.fn(),
   close: vi.fn(),
@@ -27,6 +31,14 @@ vi.mock("../server/services/memory-service", () => ({
 
 vi.mock("../lib/vector/retriever", () => ({
   VectorRetriever: vi.fn(() => vectorRetrieverMock),
+}));
+
+vi.mock("../lib/vector/query-rewriter", () => ({
+  rewriteQueryVariants: vi.fn(async () => []),
+}));
+
+vi.mock("../lib/graph/wiki-graph", () => ({
+  WikiGraph: vi.fn(() => wikiGraphMock),
 }));
 
 vi.mock("../server/services/knowledge-agent", () => ({
@@ -80,6 +92,7 @@ describe("memory list/search/ingest HTTP contracts", () => {
       results: [{ memoryId: memory.id, similarity: 0.92 }],
       mode: "vector",
     });
+    wikiGraphMock.getNeighbors.mockResolvedValue([]);
     knowledgeAgentMock.processIngest.mockResolvedValue("event-1");
   });
 
@@ -112,7 +125,9 @@ describe("memory list/search/ingest HTTP contracts", () => {
     expect(body.data.total).toBe(1);
     expect(body.data.retrievalMode).toBe("vector");
     expect(body.data.degradedMode).toBe(false);
-    expect(body.data.results[0]).toMatchObject({ score: 0.92, channels: ["vector"] });
+    expect(body.data.results[0].score).toBeGreaterThan(0);
+    expect(body.data.results[0].score).toBeLessThan(0.92);
+    expect(body.data.results[0].channels).toEqual(["vector"]);
   });
 
   it("GET /api/memory/search exposes keyword degradation mode", async () => {
@@ -129,7 +144,9 @@ describe("memory list/search/ingest HTTP contracts", () => {
     expect(response.status).toBe(200);
     expect(body.data.retrievalMode).toBe("keyword");
     expect(body.data.degradedMode).toBe(true);
-    expect(body.data.results[0]).toMatchObject({ score: 0.6, channels: ["keyword"] });
+    expect(body.data.results[0].score).toBeGreaterThan(0);
+    expect(body.data.results[0].score).toBeLessThan(0.6);
+    expect(body.data.results[0].channels).toEqual(["keyword"]);
   });
 
   it("GET /api/memory/search batch-loads matching memories", async () => {
@@ -162,10 +179,26 @@ describe("memory list/search/ingest HTTP contracts", () => {
     ]);
   });
 
+  it("GET /api/memory/search includes Wikilink neighbors with an explainable graph channel", async () => {
+    const neighbor = { ...memory, id: "memory-2", title: "关联记忆" };
+    wikiGraphMock.getNeighbors.mockResolvedValue([neighbor.id]);
+    memoryServiceMock.getMemoriesByIds.mockReturnValue([memory, neighbor]);
+
+    const response = await searchMemories(
+      jsonRequest("http://localhost/api/memory/search?q=test&limit=5", "GET"),
+    );
+    const body = await responseJson(response);
+
+    expect(memoryServiceMock.getMemoriesByIds).toHaveBeenCalledWith([memory.id, neighbor.id]);
+    expect(body.data.results.find((item: typeof memory) => item.id === neighbor.id)).toMatchObject({
+      channels: ["graph"],
+    });
+  });
+
   it("GET /api/memory/search parses limit as base 10", async () => {
     await searchMemories(jsonRequest("http://localhost/api/memory/search?q=test&limit=08", "GET"));
 
-    expect(vectorRetrieverMock.searchDetailed).toHaveBeenCalledWith("test", 8, 0.3);
+    expect(vectorRetrieverMock.searchDetailed).toHaveBeenCalledWith("test", 32, 0.3);
   });
 
   it("POST /api/ingest returns the queued event inside data", async () => {

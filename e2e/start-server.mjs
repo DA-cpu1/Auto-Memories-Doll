@@ -5,6 +5,7 @@ import { resolve } from "node:path";
 const port = process.argv[2] || "4173";
 const projectRoot = process.cwd();
 const memoryRoot = resolve(projectRoot, "e2e/.tmp/memory-root");
+const sourceRoot = resolve(projectRoot, "e2e/.tmp/source");
 const seedScript = resolve(projectRoot, "e2e/seed.mjs");
 const nextCli = resolve(projectRoot, "node_modules/next/dist/bin/next");
 const launcherPidPath = resolve(projectRoot, "e2e/.tmp/web-server.pid");
@@ -54,6 +55,7 @@ server.on("exit", (code, signal) => {
   rmSync(launcherPidPath, { force: true });
   try {
     rmSync(memoryRoot, { recursive: true, force: true });
+    rmSync(sourceRoot, { recursive: true, force: true });
   } catch {
     // Windows 仍持有 SQLite 文件时，下一次 seed 会重建同一隔离目录。
   }

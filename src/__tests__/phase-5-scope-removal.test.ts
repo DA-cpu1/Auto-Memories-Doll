@@ -57,6 +57,10 @@ describe("LKA-001 Phase 5 product boundary", () => {
       "src/server/services/config-service.ts",
       "src/server/schedulers/browser-collect-scheduler.ts",
       "src/server/schedulers/mcp-collect-scheduler.ts",
+      "src/lib/memory/correction.ts",
+      "src/server/orchestrators/nightly-orchestrator.ts",
+      "src/server/services/retention-service.ts",
+      "src/server/schedulers/retention-scheduler.ts",
     ];
 
     expect(removedPaths.filter((path) => existsSync(join(ROOT, path)))).toEqual([]);
@@ -103,6 +107,8 @@ describe("LKA-001 Phase 5 product boundary", () => {
     const memoryTypes = source("src/types/memory.ts");
 
     expect(packageJson.dependencies).not.toHaveProperty("@modelcontextprotocol/sdk");
+    expect(packageJson.dependencies).not.toHaveProperty("clsx");
+    expect(packageJson.dependencies).not.toHaveProperty("tailwind-merge");
     expect(memoryTypes).toContain('"chat"');
     expect(memoryTypes).toContain('"mcp"');
     expect(memoryTypes).toContain('"skill"');

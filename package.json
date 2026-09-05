@@ -18,6 +18,7 @@
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",
     "test:e2e": "playwright test",
+    "audit:dead-code": "node scripts/audit-dead-code.mjs",
     "eval": "vitest run src/eval/retrieval-eval.test.ts"
   },
   "dependencies": {
@@ -29,11 +30,9 @@
     "ai": "^7.0.34",
     "better-sqlite3": "^12.11.1",
     "chokidar": "^5.0.0",
-    "clsx": "^2.1.1",
     "next": "^14.0.0",
     "react": "^18.2.0",
     "react-dom": "^18.2.0",
-    "tailwind-merge": "^3.6.0",
     "typescript": "^5.3.2",
     "zod": "^4.4.3"
   },

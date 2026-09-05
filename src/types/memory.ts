@@ -136,6 +136,9 @@ export type PendingEvent = {
    */
   status: "pending" | "processing" | "done" | "failed" | "rejected" | "review";
   retryCount: number;
+  /** 自动判定的稳定代码与用户可读原因；人工裁决前必须保留。 */
+  decisionReasonCode?: string;
+  decisionReason?: string;
 };
 
 export type ConflictRecord = {

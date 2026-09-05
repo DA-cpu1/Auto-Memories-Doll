@@ -54,6 +54,29 @@ function normalizeURL(baseURL?: string): string {
   return (baseURL || "https://api.openai.com/v1").replace(/\/$/, "");
 }
 
+/**
+ * Node fetch 网络层失败时 err.message 只有 "fetch failed"，
+ * 真实原因（DNS/连接被拒/TLS/代理）在 err.cause 中，需要展开才能定位问题。
+ */
+function describeCause(err: Error & { cause?: unknown }): string {
+  const causes: string[] = [];
+  let current: unknown = err.cause;
+  let depth = 0;
+  while (current && depth < 3) {
+    if (typeof current === "object" && current !== null) {
+      const c = current as { code?: string; message?: string; name?: string };
+      const label = c.code && c.message ? `${c.code} ${c.message}` : c.code || c.message || c.name || String(current);
+      causes.push(label);
+      current = (current as { cause?: unknown }).cause;
+    } else {
+      causes.push(String(current));
+      break;
+    }
+    depth += 1;
+  }
+  return causes.length > 0 ? `${err.message}（${causes.join(" <- ")}）` : err.message;
+}
+
 function getResponseError(status: number, errorData: unknown): string {
   const message =
     typeof errorData === "object" &&
@@ -83,12 +106,12 @@ async function requestWithTimeout(
   try {
     return { response: await fetch(url, { ...init, signal: controller.signal }) };
   } catch (error: unknown) {
-    const err = error as Error;
+    const err = error as Error & { cause?: unknown };
     return {
       error:
         err.name === "AbortError"
           ? "连接超时（10秒），请检查网络和 API 地址"
-          : `网络错误: ${err.message}`,
+          : `网络错误: ${describeCause(err)}`,
     };
   } finally {
     clearTimeout(timeout);

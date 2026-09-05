@@ -33,13 +33,6 @@ export const RANKER_WEIGHTS = {
 
 export const RANKER_DEFAULT_MMR_ALPHA = 0.7;
 
-/** 压缩与遗忘机制阈值 */
-export const MAX_TOTAL_MEMORIES = 2000;
-export const COMPRESSION_BATCH_SIZE = 10;
-export const COMPRESSION_AGE_DAYS = 30;
-export const COLD_HEAT_THRESHOLD = 0.05;
-export const RETENTION_RUN_INTERVAL_MS = 3600000; // 1 小时
-
 export const DEGRADATION_ALERT_THRESHOLD = 600000;
 
 /** 检索增强：query 改写最多生成的变体数（不含原句） */

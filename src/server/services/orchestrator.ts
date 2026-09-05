@@ -319,25 +319,21 @@ export class Orchestrator {
         }
         if (duplicate) {
           event.status = "rejected";
+          event.decisionReasonCode = "VECTOR_DUPLICATE";
+          event.decisionReason = `与现有记忆《${duplicate.title}》高度相似（${(
+            duplicate.similarity * 100
+          ).toFixed(1)}%），拒绝入库`;
           this.memoryService.updateEvent(event);
-          await this.recordQualityFailure(
-            event,
-            "vector-dedup",
-            new Error(
-              `与现有记忆《${duplicate.title}》高度相似（${(duplicate.similarity * 100).toFixed(1)}%），拒绝入库`,
-            ),
-          );
+          await this.recordQualityFailure(event, "vector-dedup", new Error(event.decisionReason));
           return;
         }
         const filterResult = await this.qualityFilter.filter(candidate, hints);
         if (filterResult.verdict === "reject") {
           event.status = "rejected";
+          event.decisionReasonCode = "QUALITY_REJECTED";
+          event.decisionReason = filterResult.reason || "质量未达标";
           this.memoryService.updateEvent(event);
-          await this.recordQualityFailure(
-            event,
-            "quality-filter",
-            new Error(filterResult.reason || "质量未达标"),
-          );
+          await this.recordQualityFailure(event, "quality-filter", new Error(event.decisionReason));
           return;
         }
         if (filterResult.verdict === "review") {
@@ -718,25 +714,21 @@ export class Orchestrator {
     if (similarHits === null) {
       // fail-closed：embedding 失败时无法做语义去重，重复内容可能绕过保护静默入库 → 转人工
       event.status = "review";
+      event.decisionReasonCode = "VECTOR_RECALL_UNAVAILABLE";
+      event.decisionReason = "向量召回不可用，无法进行语义去重，转人工裁决";
       this.memoryService.updateEvent(event);
-      await this.recordQualityFailure(
-        event,
-        "vector-recall",
-        new Error("向量召回不可用，无法进行语义去重，转人工裁决"),
-      );
+      await this.recordQualityFailure(event, "vector-recall", new Error(event.decisionReason));
       return;
     }
     const duplicate = similarHits.find((h) => h.similarity >= VECTOR_DEDUP_SIMILARITY);
     if (duplicate) {
       event.status = "rejected";
+      event.decisionReasonCode = "VECTOR_DUPLICATE";
+      event.decisionReason = `与现有记忆《${duplicate.title}》高度相似（${(
+        duplicate.similarity * 100
+      ).toFixed(1)}%），拒绝入库`;
       this.memoryService.updateEvent(event);
-      await this.recordQualityFailure(
-        event,
-        "vector-dedup",
-        new Error(
-          `与现有记忆《${duplicate.title}》高度相似（${(duplicate.similarity * 100).toFixed(1)}%），拒绝入库`,
-        ),
-      );
+      await this.recordQualityFailure(event, "vector-dedup", new Error(event.decisionReason));
       return;
     }
 
@@ -748,12 +740,11 @@ export class Orchestrator {
     if (filterResult.verdict !== "accept") {
       // reject → 终态拒绝不重试；review → 挂起待人工裁决（均不进 failed 重试循环）
       event.status = filterResult.verdict === "reject" ? "rejected" : "review";
+      event.decisionReasonCode =
+        filterResult.verdict === "reject" ? "QUALITY_REJECTED" : "QUALITY_REVIEW_REQUIRED";
+      event.decisionReason = filterResult.reason || "质量未达标";
       this.memoryService.updateEvent(event);
-      await this.recordQualityFailure(
-        event,
-        "quality-filter",
-        new Error(filterResult.reason || "质量未达标"),
-      );
+      await this.recordQualityFailure(event, "quality-filter", new Error(event.decisionReason));
       return;
     }
 
@@ -765,12 +756,10 @@ export class Orchestrator {
     const cards = await this.extraction.extract(candidate, hints);
     if (!cards || cards.length === 0) {
       event.status = "review";
+      event.decisionReasonCode = "MEMORY_EXTRACTION_UNAVAILABLE";
+      event.decisionReason = "记忆抽取失败（模型输出异常或降级），转人工裁决";
       this.memoryService.updateEvent(event);
-      await this.recordQualityFailure(
-        event,
-        "memory-extraction",
-        new Error("记忆抽取失败（模型输出异常或降级），转人工裁决"),
-      );
+      await this.recordQualityFailure(event, "memory-extraction", new Error(event.decisionReason));
       return;
     }
 
@@ -929,8 +918,10 @@ export class Orchestrator {
 
     if (action === "reject") {
       event.status = "rejected";
+      event.decisionReasonCode = "MANUAL_REJECTED";
+      event.decisionReason = "人工裁决：拒绝入库";
       this.memoryService.updateEvent(event);
-      await this.recordQualityFailure(event, "review-decision", new Error("人工裁决：拒绝入库"));
+      await this.recordQualityFailure(event, "review-decision", new Error(event.decisionReason));
       return event;
     }
 

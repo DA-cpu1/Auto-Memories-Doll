@@ -28,6 +28,7 @@ export default defineConfig({
     reuseExistingServer: false,
     env: {
       MEMORY_ROOT: e2eMemoryRoot,
+      MODEL_API_KEY: "",
       VECTOR_BACKEND: "js",
       NIGHTLY_ENABLED: "false",
       NEXT_TELEMETRY_DISABLED: "1",

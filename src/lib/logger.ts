@@ -77,7 +77,6 @@ function log(
 
 // 预置模块日志器
 export const logger = {
-  chat: createLogger("chat"),
   memory: createLogger("memory"),
   ingest: createLogger("ingest"),
   audit: createLogger("audit"),
@@ -85,8 +84,5 @@ export const logger = {
   api: createLogger("api"),
   storage: createLogger("storage"),
   vector: createLogger("vector"),
-  retention: createLogger("retention"),
   quality: createLogger("quality"),
-  mcp: createLogger("mcp"),
-  nightly: createLogger("nightly"),
 };

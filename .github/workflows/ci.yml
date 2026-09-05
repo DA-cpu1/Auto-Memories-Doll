@@ -39,6 +39,9 @@ jobs:
       - name: Strict lint
         run: npm run lint
 
+      - name: Dead-code reachability audit
+        run: npm run audit:dead-code
+
       - name: Unit & integration tests
         run: npm run test
 

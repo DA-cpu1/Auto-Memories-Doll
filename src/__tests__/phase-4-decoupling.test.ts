@@ -21,9 +21,8 @@ describe("LKA-001 Phase 4 dependency boundaries", () => {
   it("keeps ranking independent from inferred profile data", () => {
     const ranker = source("src/lib/vector/ranker.ts");
     const scoring = source("src/config/scoring.config.ts");
-    const memoryScorer = source("src/features/memory/scorer.ts");
 
-    for (const content of [ranker, scoring, memoryScorer]) {
+    for (const content of [ranker, scoring]) {
       expect(content).not.toMatch(/profileTags|tagAffinity|readProfileTags/);
     }
     expect(ranker).toContain("qualityScore");
@@ -38,14 +37,11 @@ describe("LKA-001 Phase 4 dependency boundaries", () => {
     const retainedConsumers = [
       "src/lib/vector/generator.ts",
       "src/lib/vector/query-rewriter.ts",
-      "src/lib/memory/correction.ts",
       "src/server/services/knowledge-agent.ts",
       "src/server/services/memory-extraction-service.ts",
       "src/server/services/orchestrator.ts",
       "src/server/services/quality-filter-service.ts",
       "src/server/services/topic-classification-service.ts",
-      "src/server/orchestrators/contradiction-detector.ts",
-      "src/server/orchestrators/link-supplementer.ts",
     ];
 
     for (const file of retainedConsumers) {
@@ -58,12 +54,8 @@ describe("LKA-001 Phase 4 dependency boundaries", () => {
     expect(source("src/lib/ai/knowledge-model-adapter.ts")).not.toMatch(/ai-events/);
   });
 
-  it("keeps nightly knowledge maintenance free of profile and chat routing work", () => {
-    const nightly = source("src/server/orchestrators/nightly-orchestrator.ts");
-    const reporter = source("src/server/orchestrators/daily-reporter.ts");
-
-    expect(nightly).not.toMatch(/ProfileUpdater|RouteOptimizer|routing/);
-    expect(reporter).not.toMatch(/路由表优化|routing/);
+  it("keeps non-audited retention and nightly loops out of the production bootstrap", () => {
+    expect(source("src/instrumentation.ts")).not.toMatch(/RetentionScheduler|NightlyScheduler/);
   });
 
   it("does not start the legacy MCP collector in the production bootstrap", () => {

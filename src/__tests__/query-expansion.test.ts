@@ -8,7 +8,7 @@ vi.mock("../lib/vector/query-rewriter", () => ({
   rewriteQueryVariants: mocks.rewriteQueryVariants,
 }));
 
-import { searchWithExpansion } from "../lib/vector/query-expansion";
+import { searchWithExpansion, searchWithExpansionDetailed } from "../lib/vector/query-expansion";
 
 function makeRetriever(resultsByQuery: Record<string, { memoryId: string; similarity: number }[]>) {
   const search = vi.fn(async (query: string) => resultsByQuery[query] ?? []);
@@ -57,6 +57,26 @@ describe("searchWithExpansion", () => {
     ]);
   });
 
+  it("并行发起原句和改写变体检索", async () => {
+    mocks.rewriteQueryVariants.mockResolvedValue(["变体A"]);
+    let releaseOriginal!: (value: { memoryId: string; similarity: number }[]) => void;
+    const original = new Promise<{ memoryId: string; similarity: number }[]>((resolve) => {
+      releaseOriginal = resolve;
+    });
+    const search = vi.fn((query: string) =>
+      query === "查询" ? original : Promise.resolve([{ memoryId: "m2", similarity: 0.8 }]),
+    );
+
+    const pending = searchWithExpansion({ search }, "查询", 10);
+    await vi.waitFor(() => expect(search).toHaveBeenCalledTimes(2));
+    releaseOriginal([{ memoryId: "m1", similarity: 0.9 }]);
+
+    await expect(pending).resolves.toEqual([
+      { memoryId: "m1", similarity: 0.9 },
+      { memoryId: "m2", similarity: 0.8 },
+    ]);
+  });
+
   it("合并结果超过 limit 时截断", async () => {
     mocks.rewriteQueryVariants.mockResolvedValue(["变体A"]);
     const retriever = makeRetriever({
@@ -94,5 +114,22 @@ describe("searchWithExpansion", () => {
 
     expect(retriever.search).toHaveBeenCalledWith("查询", 10, 0.4);
     expect(retriever.search).toHaveBeenCalledWith("变体A", 10, 0.4);
+  });
+
+  it("详细结果保留原句实际使用的降级模式", async () => {
+    mocks.rewriteQueryVariants.mockResolvedValue(["改写查询"]);
+    const searchDetailed = vi.fn(async (query: string) => ({
+      mode: "keyword" as const,
+      results: [{ memoryId: query === "原句查询" ? "m1" : "m2", similarity: 0.8 }],
+    }));
+
+    const response = await searchWithExpansionDetailed({ searchDetailed }, "原句查询", 10, {
+      minSimilarity: 0.3,
+    });
+
+    expect(response.mode).toBe("keyword");
+    expect(response.results.map((result) => result.memoryId)).toEqual(["m1", "m2"]);
+    expect(searchDetailed).toHaveBeenCalledWith("原句查询", 10, 0.3);
+    expect(searchDetailed).toHaveBeenCalledWith("改写查询", 10, 0.3);
   });
 });

@@ -168,7 +168,12 @@ describe.sequential("KnowledgeAgent source orchestration", () => {
     queue.close();
     expect(agent.listProgress({ eventId: event.eventId }).slice(-2)).toEqual([
       expect.objectContaining({ stage: "processing", outcome: "completed" }),
-      expect.objectContaining({ stage: "review", outcome: "waiting" }),
+      expect.objectContaining({
+        stage: "review",
+        outcome: "waiting",
+        errorCode: "VECTOR_RECALL_UNAVAILABLE",
+        error: expect.stringContaining("向量召回不可用"),
+      }),
     ]);
     agent.close();
   });

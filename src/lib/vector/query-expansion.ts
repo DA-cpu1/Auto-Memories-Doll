@@ -1,4 +1,4 @@
-import type { VectorRetriever } from "./retriever";
+import type { RetrievalMode, VectorRetriever } from "./retriever";
 import { rewriteQueryVariants } from "./query-rewriter";
 import { logger } from "../logger";
 
@@ -30,11 +30,14 @@ export async function searchWithExpansion(
   const queries = [query.trim(), ...variants];
 
   const best = new Map<string, number>();
-  for (const q of queries) {
-    const results =
+  const resultSets = await Promise.all(
+    queries.map((currentQuery) =>
       minSimilarity !== undefined
-        ? await retriever.search(q, limit, minSimilarity)
-        : await retriever.search(q, limit);
+        ? retriever.search(currentQuery, limit, minSimilarity)
+        : retriever.search(currentQuery, limit),
+    ),
+  );
+  for (const results of resultSets) {
     for (const r of results) {
       const prev = best.get(r.memoryId);
       if (prev === undefined || r.similarity > prev) {
@@ -54,4 +57,41 @@ export async function searchWithExpansion(
     .map(([memoryId, similarity]) => ({ memoryId, similarity }))
     .sort((a, b) => b.similarity - a.similarity)
     .slice(0, limit);
+}
+
+/** 与生产搜索 API 共用的多路召回版本，同时返回实际检索模式。 */
+export async function searchWithExpansionDetailed(
+  retriever: Pick<VectorRetriever, "searchDetailed">,
+  query: string,
+  limit: number,
+  options: SearchWithExpansionOptions = {},
+): Promise<{
+  results: { memoryId: string; similarity: number }[];
+  mode: RetrievalMode;
+}> {
+  const { expansionEnabled = true, minSimilarity } = options;
+  const variants = expansionEnabled ? await rewriteQueryVariants(query) : [];
+  const queries = [query.trim(), ...variants];
+  const best = new Map<string, number>();
+  const responses = await Promise.all(
+    queries.map((currentQuery) => retriever.searchDetailed(currentQuery, limit, minSimilarity)),
+  );
+  const mode: RetrievalMode = responses[0]?.mode ?? "keyword";
+
+  for (const response of responses) {
+    for (const result of response.results) {
+      const previous = best.get(result.memoryId);
+      if (previous === undefined || result.similarity > previous) {
+        best.set(result.memoryId, result.similarity);
+      }
+    }
+  }
+
+  return {
+    results: [...best.entries()]
+      .map(([memoryId, similarity]) => ({ memoryId, similarity }))
+      .sort((a, b) => b.similarity - a.similarity)
+      .slice(0, limit),
+    mode,
+  };
 }

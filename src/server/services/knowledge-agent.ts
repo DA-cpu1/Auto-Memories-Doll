@@ -337,10 +337,25 @@ export class KnowledgeAgent {
             startedAt,
             event.memoryId,
             "waiting",
+            progressFailure(
+              persisted.decisionReasonCode ?? "MANUAL_REVIEW",
+              persisted.decisionReason ?? "质量闸门要求人工确认",
+            ),
           );
           break;
         case "rejected":
-          this.transition(sourceEvent, "processing", "rejected", startedAt, event.memoryId);
+          this.transition(
+            sourceEvent,
+            "processing",
+            "rejected",
+            startedAt,
+            event.memoryId,
+            "completed",
+            progressFailure(
+              persisted.decisionReasonCode ?? "AUTOMATIC_REJECTED",
+              persisted.decisionReason ?? "候选被自动拒绝",
+            ),
+          );
           break;
         case "failed":
           this.transition(
@@ -968,7 +983,7 @@ export class KnowledgeAgent {
       timestamp: new Date().toISOString(),
       durationMs: Math.max(0, Date.now() - startedAt),
       outcome,
-      errorCode: error ? "SOURCE_PROCESSING_FAILED" : undefined,
+      errorCode: getProgressErrorCode(error),
       error: error instanceof Error ? error.message : error ? String(error) : undefined,
       retryable: stage === "failed_retryable",
       degradedCapabilities: KnowledgeModelAdapter.getDegradedCapabilities(),
@@ -1036,6 +1051,22 @@ export class KnowledgeAgent {
       .get(eventId) as ProgressRow | undefined;
     return row ? this.mapProgressRow(row) : null;
   }
+}
+
+function progressFailure(code: string, message: string): Error & { code: string } {
+  return Object.assign(new Error(message), { code });
+}
+
+function getProgressErrorCode(error: unknown): string | undefined {
+  if (!error) return undefined;
+  if (
+    typeof error === "object" &&
+    "code" in error &&
+    typeof (error as { code?: unknown }).code === "string"
+  ) {
+    return (error as { code: string }).code;
+  }
+  return "SOURCE_PROCESSING_FAILED";
 }
 
 function stableFileMemoryId(identity: string): string {

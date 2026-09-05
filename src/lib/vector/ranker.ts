@@ -1,5 +1,6 @@
 import { MemoryRecord } from "../../types/memory";
 import { RANKER_DEFAULT_MMR_ALPHA, RANKER_WEIGHTS } from "../../config/constants";
+import { scoringConfig } from "../../config/scoring.config";
 
 export type RankResult = {
   memoryId: string;
@@ -115,7 +116,7 @@ export class Ranker {
         if (!memory) return null;
 
         const hoursSinceUpdate = (now - new Date(memory.updatedAt).getTime()) / (1000 * 60 * 60);
-        const recencyScore = Math.exp(-0.01 * hoursSinceUpdate);
+        const recencyScore = Math.exp(-scoringConfig.recencyLambda * hoursSinceUpdate);
 
         const accessScore = Math.log(1 + memory.accessCount) / Math.log(1 + maxAccess);
 

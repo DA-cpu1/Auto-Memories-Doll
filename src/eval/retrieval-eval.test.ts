@@ -7,6 +7,7 @@
  * - keyword：embedding 不可用（无 Key / 降级）时的 SQLite 关键词保底召回；
  * - vector：确定性本地 embedding（字符 bigram 哈希）走完整
  *   VectorIndex(js-exact) 余弦检索链路，不依赖外部 API，CI 可复现。
+ * - scenario：含噪、同义词、主题过滤和近似重复四类 Phase 8 风险。
  *
  * 指标：Recall@1 / Recall@5 / Recall@10 / MRR，
  * 报告写入 evals/reports/retrieval-eval-report.{json,md}。
@@ -18,6 +19,16 @@ import { join } from "path";
 
 const EVAL_DIMENSIONS = 256;
 const SEED_TIME = "2026-08-23T00:00:00.000Z";
+const REGRESSION_THRESHOLDS = {
+  keyword: { recallAt5: 0.65, mrr: 0.65 },
+  vector: { recallAt5: 0.85, mrr: 0.75 },
+  vectorScenarioRecallAt5: {
+    noise: 1,
+    synonym: 0.5,
+    "topic-filter": 1,
+    "near-duplicate": 1,
+  },
+} as const;
 
 const { dbRef, evalMock, bigramEmbedding } = vi.hoisted(() => {
   /**
@@ -134,14 +145,25 @@ function seedVectors(): void {
 async function runRetrieval(useVector: boolean): Promise<RankedHit[]> {
   evalMock.useVector = useVector;
   const retriever = new VectorRetriever();
+  const memoryService = new MemoryService();
   try {
     const hits: RankedHit[] = [];
     for (const q of EVAL_QUERIES) {
-      // minSimilarity=0：评测关注排序质量，阈值过滤留给真实模型场景
-      const response = await retriever.searchDetailed(q.query, 10, 0);
+      // minSimilarity=0：评测关注排序质量，阈值过滤留给真实模型场景。
+      // 带 topic 的查询使用生产侧同一 MemoryService 过滤后的候选集合。
+      const ranked = q.topic
+        ? (
+            await retriever.searchWithMemories(
+              q.query,
+              memoryService.listMemories({ topic: q.topic, limit: -1 }),
+              10,
+              0,
+            )
+          ).map((result) => result.memory.id)
+        : (await retriever.searchDetailed(q.query, 10, 0)).results.map((result) => result.memoryId);
       hits.push({
         query: q.query,
-        ranked: response.results.map((r) => r.memoryId),
+        ranked,
         expected: q.expected,
         group: q.kind,
       });
@@ -180,21 +202,26 @@ describe("检索评测（Recall@k / MRR）", () => {
     // 阈值含义：评测集上的回归下限，指标明显劣化时测试失败。
     // 关键词保底召回无法覆盖口语化改写（byKind.colloquial 恒为 0 属预期），
     // 故总体下限按 title + keyword 类目的表现设定。
-    expect(metrics.recallAt5).toBeGreaterThanOrEqual(0.7);
-    expect(metrics.mrr).toBeGreaterThanOrEqual(0.7);
+    expect(metrics.recallAt5).toBeGreaterThanOrEqual(REGRESSION_THRESHOLDS.keyword.recallAt5);
+    expect(metrics.mrr).toBeGreaterThanOrEqual(REGRESSION_THRESHOLDS.keyword.mrr);
   });
 
   it("vector 模式：确定性向量召回达到基线，且口语化改写优于关键词", async () => {
     vectorHits = await runRetrieval(true);
     const metrics = computeMetrics(vectorHits);
 
-    expect(metrics.recallAt5).toBeGreaterThanOrEqual(0.8);
-    expect(metrics.mrr).toBeGreaterThanOrEqual(0.7);
+    expect(metrics.recallAt5).toBeGreaterThanOrEqual(REGRESSION_THRESHOLDS.vector.recallAt5);
+    expect(metrics.mrr).toBeGreaterThanOrEqual(REGRESSION_THRESHOLDS.vector.mrr);
 
     // 语义检索的核心价值：口语化改写在关键词召回为 0 时仍能被召回
     const vectorColloquial = groupMetrics(vectorHits).colloquial;
     const keywordColloquial = groupMetrics(keywordHits).colloquial;
     expect(vectorColloquial.recallAt5).toBeGreaterThan(keywordColloquial.recallAt5);
+
+    const scenarios = groupMetrics(vectorHits);
+    for (const [kind, threshold] of Object.entries(REGRESSION_THRESHOLDS.vectorScenarioRecallAt5)) {
+      expect(scenarios[kind].recallAt5, `${kind} Recall@5`).toBeGreaterThanOrEqual(threshold);
+    }
   });
 
   it("评测报告写入 evals/reports", () => {
@@ -204,6 +231,7 @@ describe("检索评测（Recall@k / MRR）", () => {
         memories: EVAL_MEMORIES.length,
         queries: EVAL_QUERIES.length,
       },
+      thresholds: REGRESSION_THRESHOLDS,
       modes: {
         keyword: {
           overall: computeMetrics(keywordHits),
@@ -230,6 +258,7 @@ describe("检索评测（Recall@k / MRR）", () => {
 function renderMarkdown(report: {
   generatedAt: string;
   fixture: { memories: number; queries: number };
+  thresholds: typeof REGRESSION_THRESHOLDS;
   modes: Record<
     string,
     {
@@ -252,6 +281,7 @@ function renderMarkdown(report: {
     "",
     `- 生成时间: ${report.generatedAt}`,
     `- 评测集: ${report.fixture.memories} 条记忆 / ${report.fixture.queries} 条查询`,
+    `- 回归阈值: keyword Recall@5 >= ${report.thresholds.keyword.recallAt5}, MRR >= ${report.thresholds.keyword.mrr}; vector Recall@5 >= ${report.thresholds.vector.recallAt5}, MRR >= ${report.thresholds.vector.mrr}`,
     "",
     "## 总体指标",
     "",

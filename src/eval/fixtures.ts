@@ -20,7 +20,10 @@ export type EvalQuery = {
   query: string;
   expected: string;
   /** 查询类型标签，用于分组统计 */
-  kind: "title" | "keyword" | "colloquial";
+  kind:
+    "title" | "keyword" | "colloquial" | "noise" | "synonym" | "topic-filter" | "near-duplicate";
+  /** 可选主题约束，用于验证候选集合过滤不会破坏排序。 */
+  topic?: string;
 };
 
 export const EVAL_MEMORIES: EvalMemory[] = [
@@ -186,6 +189,15 @@ export const EVAL_MEMORIES: EvalMemory[] = [
     tags: ["提示词", "模板"],
     topic: "agent-dev",
   },
+  {
+    id: "mem-agent-06",
+    title: "MMR 多样性参数调优记录",
+    content:
+      "MMR 的 lambda 越高越偏向相关性，越低越强调候选之间的差异。调参时同时观察首条命中和结果主题覆盖率。",
+    summary: "MMR lambda 参数对相关性和多样性的影响",
+    tags: ["检索", "mmr", "lambda"],
+    topic: "agent-dev",
+  },
 
   // ── 学习生活 ──
   {
@@ -236,6 +248,14 @@ export const EVAL_MEMORIES: EvalMemory[] = [
     tags: ["徒步", "户外"],
     topic: "daily-notes",
   },
+  {
+    id: "mem-daily-07",
+    title: "周末停车地点备忘",
+    content: "周末去城郊徒步时可以把车停在游客中心停车场，停车后步行到八公里路线入口。",
+    summary: "徒步路线附近的停车位置",
+    tags: ["停车", "徒步"],
+    topic: "daily-notes",
+  },
 ];
 
 export const EVAL_QUERIES: EvalQuery[] = [
@@ -274,4 +294,54 @@ export const EVAL_QUERIES: EvalQuery[] = [
   { query: "流式输出是怎么实现的", expected: "mem-agent-01", kind: "colloquial" },
   { query: "暑假打算学点什么", expected: "mem-daily-01", kind: "colloquial" },
   { query: "大创要交哪些材料", expected: "mem-daily-03", kind: "colloquial" },
+
+  // 含噪查询：日志前缀、时间戳和标点不能淹没有效检索词
+  {
+    query: "[WARN] 2026-09-04 22:10 >>> MQTT 通信协议到底怎么保证送达???",
+    expected: "mem-park-03",
+    kind: "noise",
+  },
+  {
+    query: "DEBUG:: build failed -- CMake target_link_libraries 配置!!!",
+    expected: "mem-cpp-02",
+    kind: "noise",
+  },
+
+  // 同义表达：不直接复述标题，验证语义通道的召回价值
+  {
+    query: "独占所有权的资源怎样靠 RAII 自动释放",
+    expected: "mem-cpp-01",
+    kind: "synonym",
+  },
+  {
+    query: "怎样让神经网络体积更小后部署到小型边缘设备",
+    expected: "mem-park-02",
+    kind: "synonym",
+  },
+
+  // 主题过滤：相同词汇出现在不同领域时，只在指定主题候选集内排序
+  {
+    query: "索引怎么设计",
+    expected: "mem-crm-03",
+    kind: "topic-filter",
+    topic: "crm-project",
+  },
+  {
+    query: "停车方案",
+    expected: "mem-park-01",
+    kind: "topic-filter",
+    topic: "edge-parking",
+  },
+
+  // 近似重复：相似候选共存时仍需靠细节区分目标
+  {
+    query: "MMR lambda 参数怎样平衡相关性和结果差异",
+    expected: "mem-agent-06",
+    kind: "near-duplicate",
+  },
+  {
+    query: "泊车系统用 Camera Module 3 和 YOLOv8n 的完整架构",
+    expected: "mem-park-01",
+    kind: "near-duplicate",
+  },
 ];

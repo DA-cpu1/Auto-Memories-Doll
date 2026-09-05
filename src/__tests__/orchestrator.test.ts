@@ -638,6 +638,10 @@ describe("Orchestrator", () => {
 
       expect(event.status).toBe("review");
       expect(event.retryCount).toBe(0);
+      expect(event).toMatchObject({
+        decisionReasonCode: "VECTOR_RECALL_UNAVAILABLE",
+        decisionReason: expect.stringContaining("向量召回不可用"),
+      });
       expect(memoryServiceStub.createMemoryRecord).not.toHaveBeenCalled();
       const fileManager = await import("../lib/storage/file-manager");
       expect(fileManager.createFailureRecord).toHaveBeenCalledWith(
@@ -724,6 +728,10 @@ describe("Orchestrator", () => {
 
       expect(event.status).toBe("review");
       expect(event.retryCount).toBe(0);
+      expect(event).toMatchObject({
+        decisionReasonCode: "QUALITY_REVIEW_REQUIRED",
+        decisionReason: "处于灰区",
+      });
       expect(memoryServiceStub.createMemoryRecord).not.toHaveBeenCalled();
     });
 
@@ -797,6 +805,10 @@ describe("Orchestrator", () => {
 
       expect(event.status).toBe("review");
       expect(event.retryCount).toBe(0);
+      expect(event).toMatchObject({
+        decisionReasonCode: "MEMORY_EXTRACTION_UNAVAILABLE",
+        decisionReason: expect.stringContaining("记忆抽取失败"),
+      });
       expect(memoryServiceStub.createMemoryRecord).not.toHaveBeenCalled();
       const fileManager = await import("../lib/storage/file-manager");
       expect(fileManager.createFailureRecord).toHaveBeenCalledWith(
