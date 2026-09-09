@@ -2,6 +2,7 @@ import { MemoryRecord } from "../../types/memory";
 import { KnowledgeModelAdapter } from "../../lib/ai/knowledge-model-adapter";
 import { SimilarMemoryHint } from "./quality-filter-service";
 import { logger } from "../../lib/logger";
+import { parseModelObject } from "../../lib/ai/model-json";
 
 /** 抽取产出的一张原子记忆卡片（全部为中文人可读内容） */
 export type ExtractedCard = {
@@ -25,31 +26,26 @@ const MAX_PARSE_ATTEMPTS = 2;
  * 按"一个话题一张卡片"拆分，并将每张卡片全文重写为简体中文。
  *
  * 这是"原文直存"与"人可读知识卡"的分界线：质量闸门只判断值不值得存，
- * 本服务负责决定"怎么存才易读"。失败时返回 null（fail-closed 转人工），绝不把半成品入库。
+ * 本服务负责决定"怎么存才易读"。失败时返回 null，由编排层进入服务等待，不发布半成品。
  */
 export class MemoryExtractionService {
   async extract(
     candidate: MemoryRecord,
     similar: SimilarMemoryHint[] = [],
   ): Promise<ExtractedCard[] | null> {
-    // 模型降级时无法改写 → 转人工（与质量闸门同一 fail-closed 策略）
-    if (KnowledgeModelAdapter.isDegradedMode) {
-      return null;
-    }
-
     const prompt = this.buildPrompt(candidate, similar);
 
     for (let attempt = 1; attempt <= MAX_PARSE_ATTEMPTS; attempt++) {
       try {
         const response = await KnowledgeModelAdapter.generate(prompt, "flagship");
+        if (response.finishReason === "length" || response.finishReason === "degraded") return null;
         const cards = this.parseCards(response.content, candidate.content);
         if (cards) return cards;
         logger.quality.warn("抽取输出非标准 JSON，重试", {
           attempt,
-          output: response.content.slice(0, 200),
         });
-      } catch (error) {
-        logger.quality.warn("记忆抽取调用失败", { error: (error as Error).message });
+      } catch {
+        logger.quality.warn("记忆抽取调用失败");
         return null;
       }
     }
@@ -62,11 +58,10 @@ export class MemoryExtractionService {
    * 逐卡校验（空标题/空正文丢弃），返回空数组或结构异常时返回 null（由调用方转人工）。
    */
   private parseCards(text: string, sourceContent: string): ExtractedCard[] | null {
-    const json = this.extractJsonObject(text);
-    if (!json) return null;
+    const parsed = parseModelObject(text);
+    if (!parsed) return null;
 
     try {
-      const parsed = JSON.parse(json) as { memories?: unknown };
       if (!Array.isArray(parsed.memories) || parsed.memories.length === 0) return null;
 
       const cards: ExtractedCard[] = [];
@@ -92,31 +87,6 @@ export class MemoryExtractionService {
     } catch {
       return null;
     }
-  }
-
-  private extractJsonObject(text: string): string | null {
-    const start = text.indexOf("{");
-    if (start < 0) return null;
-    let depth = 0;
-    let quoted = false;
-    let escaped = false;
-    for (let index = start; index < text.length; index++) {
-      const char = text[index];
-      if (escaped) {
-        escaped = false;
-        continue;
-      }
-      if (char === "\\") {
-        escaped = quoted;
-        continue;
-      }
-      if (char === '"') quoted = !quoted;
-      if (quoted) continue;
-      if (char === "{") depth += 1;
-      if (char === "}") depth -= 1;
-      if (depth === 0) return text.slice(start, index + 1);
-    }
-    return null;
   }
 
   private buildPrompt(candidate: MemoryRecord, similar: SimilarMemoryHint[]): string {

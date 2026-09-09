@@ -1,5 +1,4 @@
 import { KnowledgeModelAdapter } from "../ai/knowledge-model-adapter";
-import { apiConfig } from "../../config/api.config";
 import { VectorRecord } from "../../types/memory";
 import { getCurrentTime } from "../utils/date";
 
@@ -9,12 +8,13 @@ export const generateEmbedding = async (text: string): Promise<number[]> => {
 };
 
 export const buildVectorRecord = async (memoryId: string, text: string): Promise<VectorRecord> => {
-  const embedding = await generateEmbedding(text);
+  const { embedding, model } = await KnowledgeModelAdapter.generateEmbedding(text);
+  if (isEmbeddingEmpty(embedding)) throw new Error("Embedding unavailable");
 
   return {
     memoryId,
     embedding,
-    model: apiConfig.embedding.name,
+    model,
     dimensions: embedding.length,
     updatedAt: getCurrentTime(),
   };

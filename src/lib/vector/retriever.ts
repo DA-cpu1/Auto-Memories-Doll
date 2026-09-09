@@ -2,6 +2,7 @@ import { VectorIndex } from "./index";
 import { generateEmbedding, isEmbeddingEmpty } from "./generator";
 import { MemoryRecord } from "../../types/memory";
 import { KeywordIndex, rankByKeywords } from "./keyword-index";
+import { getKnowledgeAiConfig } from "../ai/knowledge-model-adapter";
 
 /**
  * 默认相似度阈值：cosine similarity 低于此值的记忆视为噪声，不返回。
@@ -51,7 +52,11 @@ export class VectorRetriever {
       };
     }
 
-    const results = this.getIndex().search(embedding, limit);
+    const results = this.getIndex().search(
+      embedding,
+      limit,
+      getKnowledgeAiConfig().embedding.model,
+    );
     return {
       results: minSimilarity > 0 ? results.filter((r) => r.similarity >= minSimilarity) : results,
       mode: "vector",
@@ -85,7 +90,7 @@ export class VectorRetriever {
       index.getBackendName() === "js-exact"
         ? memories.length
         : Math.min(memories.length, Math.max(limit * 4, 50));
-    const results = index.search(embedding, candidateLimit);
+    const results = index.search(embedding, candidateLimit, getKnowledgeAiConfig().embedding.model);
 
     const memoryMap = new Map(memories.map((m) => [m.id, m]));
 

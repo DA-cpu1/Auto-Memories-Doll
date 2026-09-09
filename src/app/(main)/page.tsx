@@ -54,7 +54,7 @@ type SourceStatus = {
 };
 
 type QueueStatus = {
-  events?: { pending?: number; review?: number; failed?: number };
+  events?: { pending?: number; review?: number; failed?: number; waiting_dependency?: number };
 };
 
 const STAGE_LABELS: Record<string, string> = {
@@ -70,6 +70,7 @@ const STAGE_LABELS: Record<string, string> = {
   review: "待审核",
   rejected: "已拒绝",
   failed_retryable: "等待重试",
+  waiting_dependency: "等待模型服务",
 };
 
 const DIALOGUE_LABELS: Record<CodexDialogueDiagnostics["reasons"][number], string> = {
@@ -138,7 +139,7 @@ export default function DashboardPage() {
             Local Knowledge Agent
           </p>
           <h1 className="text-2xl font-bold text-[#3E3224] sm:text-3xl">知识处理概览</h1>
-          <p className="mt-2 text-sm text-[#6F604B]">来源健康、处理事件、审核队列与检索状态</p>
+          <p className="mt-2 text-sm text-[#6F604B]">来源健康、自动处理事件与检索状态</p>
         </div>
         <button type="button" className="btn btn-secondary self-start" onClick={loadStatus}>
           刷新状态
@@ -159,10 +160,11 @@ export default function DashboardPage() {
             },
             { label: "待处理", value: events?.pending ?? 0, tone: "text-[#A67C00]" },
             {
-              label: "待审核",
-              value: events?.review ?? 0,
-              tone: (events?.review ?? 0) > 0 ? "text-[#A14C37]" : "text-[#3E3224]",
+              label: "等待模型服务",
+              value: events?.waiting_dependency ?? 0,
+              tone: "text-[#A67C00]",
             },
+            { label: "处理失败", value: events?.failed ?? 0, tone: "text-[#A14C37]" },
           ].map((item) => (
             <div key={item.label} className="rounded-lg border border-[#E0D6C7] bg-[#FFFDF9] p-4">
               <p className="text-xs font-medium text-[#8B7355]">{item.label}</p>
@@ -179,7 +181,9 @@ export default function DashboardPage() {
         >
           当前降级能力：
           {degraded.map((item) => (item === "llm" ? "LLM 加工" : "Embedding 检索")).join("、")}
-          。确定性处理继续运行，需要模型的候选将等待审核。
+          {degraded.includes("llm")
+            ? "。知识加工等待模型服务恢复。"
+            : "。语义检索不可用，关键词检索和知识加工继续运行。"}
         </div>
       ) : null}
 

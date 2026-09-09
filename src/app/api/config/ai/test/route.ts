@@ -1,4 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
+import { z } from "zod";
+import { KnowledgeConfigService } from "../../../../../server/services/knowledge-config-service";
+import { redactSecrets } from "../../../../../lib/security/secret-redactor";
 
 type ConnectionResult = {
   success: boolean;
@@ -11,7 +14,59 @@ type TestConnectionOptions = {
   baseURL?: string;
   apiKey?: string;
   model?: string;
+  credentialError?: string;
 };
+
+const aiConfigTestSchema = z.object({
+  provider: z.string().optional(),
+  baseURL: z.string().url().optional(),
+  apiKey: z.string().optional(),
+  model: z.string().optional(),
+  embedding: z
+    .object({
+      enabled: z.boolean().optional(),
+      baseURL: z.union([z.string().url(), z.literal("")]).optional(),
+      apiKey: z.string().optional(),
+      model: z.string().optional(),
+    })
+    .optional(),
+});
+
+function resolveProbeOptions(
+  options: TestConnectionOptions,
+  storedKey?: string,
+  storedURL?: string,
+): TestConnectionOptions {
+  if (!options.apiKey?.startsWith("****")) return options;
+  if (!storedKey || options.apiKey !== `****${storedKey.slice(-4)}`) {
+    return {
+      ...options,
+      apiKey: undefined,
+      credentialError: "已保存的凭据已变化，请刷新设置页或重新输入 API Key",
+    };
+  }
+  if (normalizeURL(options.baseURL) !== normalizeURL(storedURL)) {
+    return {
+      ...options,
+      apiKey: undefined,
+      credentialError: "端点已更改，请为新端点明确输入 API Key 后测试",
+    };
+  }
+  return { ...options, apiKey: storedKey };
+}
+
+function businessError(data: unknown): string | undefined {
+  const result = z
+    .object({ base_resp: z.object({ status_code: z.number(), status_msg: z.string().optional() }) })
+    .safeParse(data);
+  if (!result.success || result.data.base_resp.status_code === 0) return undefined;
+  return `提供商业务错误 ${result.data.base_resp.status_code}：${result.data.base_resp.status_msg || "请求被拒绝"}`;
+}
+
+function sanitizeMessage(message: string, keys: Array<string | undefined>): string {
+  for (const key of keys) if (key) message = message.split(key).join("[REDACTED]");
+  return redactSecrets(message).content;
+}
 
 /**
  * POST /api/config/ai/test
@@ -23,18 +78,43 @@ type TestConnectionOptions = {
  * }
  */
 export async function POST(request: NextRequest) {
+  const parsed = aiConfigTestSchema.safeParse(await request.json().catch(() => null));
+  if (!parsed.success) return NextResponse.json({ error: "测试配置格式无效" }, { status: 400 });
+  const service = new KnowledgeConfigService();
   try {
-    const body = await request.json();
-    const llm = await testChatConnection({
-      baseURL: body.baseURL,
-      apiKey: body.apiKey,
-      model: body.model,
-    });
-    const embedding = await testEmbeddingConnection({
-      baseURL: body.embedding?.baseURL || body.baseURL,
-      apiKey: body.embedding?.apiKey || body.apiKey,
-      model: body.embedding?.model,
-    });
+    const body = parsed.data;
+    const stored = service.getAiConfig();
+    const llmOptions = resolveProbeOptions(
+      {
+        baseURL: body.baseURL,
+        apiKey: body.apiKey,
+        model: body.model,
+      },
+      stored?.apiKey,
+      stored?.baseURL,
+    );
+    const embeddingOptions = resolveProbeOptions(
+      {
+        baseURL: body.embedding?.baseURL || body.baseURL,
+        apiKey: body.embedding?.apiKey || body.apiKey,
+        model: body.embedding?.model,
+      },
+      body.embedding?.apiKey ? stored?.embedding.apiKey : stored?.apiKey,
+      stored?.embedding.baseURL || stored?.baseURL,
+    );
+    const llm = await testChatConnection(llmOptions);
+    const embedding =
+      body.embedding?.enabled === false
+        ? { success: true, message: "已关闭" }
+        : await testEmbeddingConnection(embeddingOptions);
+    const keys = [
+      llmOptions.apiKey,
+      embeddingOptions.apiKey,
+      stored?.apiKey,
+      stored?.embedding.apiKey,
+    ];
+    llm.message = sanitizeMessage(llm.message, keys);
+    embedding.message = sanitizeMessage(embedding.message, keys);
 
     return NextResponse.json({
       success: llm.success && embedding.success,
@@ -47,6 +127,8 @@ export async function POST(request: NextRequest) {
     });
   } catch {
     return NextResponse.json({ success: false, error: "服务器内部错误" }, { status: 500 });
+  } finally {
+    service.close();
   }
 }
 
@@ -123,6 +205,8 @@ async function requestWithTimeout(
 
 async function testChatConnection(options: TestConnectionOptions): Promise<ConnectionResult> {
   const testModel = options.model || "gpt-4o-mini";
+  if (options.credentialError)
+    return { success: false, message: options.credentialError, model: testModel };
   if (!options.apiKey?.trim()) {
     return { success: false, message: "API Key 不能为空", model: testModel };
   }
@@ -152,12 +236,16 @@ async function testChatConnection(options: TestConnectionOptions): Promise<Conne
   }
 
   const data = await result.response.json().catch(() => ({}));
+  const failure = businessError(data);
+  if (failure) return { success: false, message: failure, model: testModel };
   const actualModel = data.model || testModel;
   return { success: true, message: `模型 ${actualModel} 响应正常`, model: actualModel };
 }
 
 async function testEmbeddingConnection(options: TestConnectionOptions): Promise<ConnectionResult> {
   const testModel = options.model || "text-embedding-3-small";
+  if (options.credentialError)
+    return { success: false, message: options.credentialError, model: testModel };
   if (!options.apiKey?.trim()) {
     return { success: false, message: "Embedding API Key 不能为空", model: testModel };
   }
@@ -186,6 +274,8 @@ async function testEmbeddingConnection(options: TestConnectionOptions): Promise<
   }
 
   const data = await result.response.json().catch(() => ({}));
+  const failure = businessError(data);
+  if (failure) return { success: false, message: failure, model: testModel };
   const vector = data.data?.[0]?.embedding;
   if (!Array.isArray(vector) || vector.length === 0) {
     return { success: false, message: "服务返回了空向量", model: testModel };

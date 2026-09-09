@@ -3,7 +3,7 @@ import { AuditService } from "./audit-service";
 import { AuditReportWriter } from "./audit-report-writer";
 import { Auditor } from "../../features/audit/auditor";
 import { AuditReporter } from "../../features/audit/reporter";
-import { QualityFilterService, SimilarMemoryHint } from "./quality-filter-service";
+import { SimilarMemoryHint } from "./quality-filter-service";
 import { MemoryExtractionService, ExtractedCard } from "./memory-extraction-service";
 import { MemoryCardHygieneService } from "./memory-card-hygiene-service";
 import { TopicClassificationService } from "./topic-classification-service";
@@ -28,9 +28,12 @@ import { getCurrentTime } from "../../lib/utils/date";
 import { logger } from "../../lib/logger";
 import { VersionManager } from "../../features/audit/version-manager";
 import { StudyGuideBuilder } from "./study-guide-builder";
+import { ModelDependencyError } from "../../lib/ai/dependency-error";
+import { dependencyConfig } from "../../config/dependency.config";
+import { ProcessingCheckpoints } from "./processing-checkpoints";
 
 const LIST_LIMIT = 500;
-const QUEUE_BATCH_SIZE = 100;
+const QUEUE_BATCH_SIZE = dependencyConfig.batchSize;
 /**
  * 去重分页拉取的单批记忆条数。
  *
@@ -73,7 +76,6 @@ export class Orchestrator {
   private memoryService: MemoryService;
   private auditService: AuditService;
   private auditor: Auditor;
-  private qualityFilter: QualityFilterService;
   private extraction: MemoryExtractionService;
   private memoryCardHygiene: MemoryCardHygieneService;
   private topicClassification: TopicClassificationService;
@@ -84,8 +86,8 @@ export class Orchestrator {
 
   constructor() {
     this.memoryService = new MemoryService();
+    this.memoryService.migrateReviewEventsToPending?.();
     this.auditService = new AuditService();
-    this.qualityFilter = new QualityFilterService();
     this.extraction = new MemoryExtractionService();
     this.memoryCardHygiene = new MemoryCardHygieneService();
     this.topicClassification = new TopicClassificationService();
@@ -127,22 +129,7 @@ export class Orchestrator {
           `如需更高性能，可升级为向量语义去重或优化去重索引。`,
       );
     }
-    const duplicateCheck = this.detectDuplicateContent(formattedContent);
-    if (duplicateCheck.isDuplicate) {
-      throw new MemoryValidationError(
-        "content",
-        `内容与现有记忆高度重复（相似度 ${(duplicateCheck.similarity * 100).toFixed(1)}%），已拒绝入库`,
-      );
-    }
-
     const pipelineResult = await processJsonPipeline(formattedContent, []);
-
-    if (pipelineResult.isDuplicate) {
-      throw new MemoryValidationError(
-        "content",
-        `内容与现有记忆高度重复（相似度 ${(pipelineResult.similarity * 100).toFixed(1)}%），已拒绝入库`,
-      );
-    }
 
     if (pipelineResult.chunks.length === 0) {
       throw new MemoryValidationError("content", "内容为空或经清洗后无效");
@@ -198,7 +185,6 @@ export class Orchestrator {
     const pendingEvents = this.getPendingEvents({ limit: QUEUE_BATCH_SIZE });
     // 轻量事件优先：巨型会话候选（几百 KB 的 JSON）单独一个就要 LLM 处理几分钟，
     // 排在队头会阻塞整批；按候选体积升序处理，让去重/小事件快速消化
-    pendingEvents.sort((a, b) => (a.candidate?.length ?? 0) - (b.candidate?.length ?? 0));
 
     for (const event of pendingEvents) {
       await this.processEvent(event);
@@ -224,6 +210,14 @@ export class Orchestrator {
   private async processEvent(event: PendingEvent): Promise<string | void> {
     try {
       let candidate = this.parseCandidate(event);
+      const checkpoints = new ProcessingCheckpoints();
+      if (checkpoints.isSuperseded(event)) {
+        event.status = "rejected";
+        event.decisionReasonCode = "SUPERSEDED";
+        event.decisionReason = "已有更新的候选版本";
+        this.memoryService.updateEvent(event);
+        return;
+      }
 
       // 删除事件：直接删除记忆，不经过审计差异比对
       if (event.eventType === "delete") {
@@ -270,12 +264,14 @@ export class Orchestrator {
       // existing.content 是中文重写卡、candidate 是采集原文，逐字段比对没有意义。
       // 原文哈希未变 → 无实质变更直接完成；变了 → 删除旧分卡后重跑抽取消费链
       if (existing.evidence?.sourceHash) {
-        if (existing.evidence.sourceHash === sourceHashOf(candidate.content)) {
+        if (
+          existing.evidence.sourceHash === sourceHashOf(candidate.content) &&
+          !checkpoints.read(event, candidate, "quality")
+        ) {
           event.status = "done";
           this.memoryService.updateEvent(event);
           return;
         }
-        await this.deleteExtractedCards(event.memoryId);
         event.status = "processing";
         this.memoryService.updateEvent(event);
         await this.ingestByExtraction(event, candidate);
@@ -301,48 +297,7 @@ export class Orchestrator {
 
       // 更新路径：content 有实质变更时同样过质量闸门（防止借更新洗入低质内容）。
       // reject 终拒；review 时质量存疑——置标志禁用 auto_merge，审计结果改走逐字段人工冲突裁决。
-      let updateQualityReview = false;
       if (event.changedFields.includes("content") && candidate.content) {
-        const similarHits = await this.recallSimilarMemories(candidate.content, event.memoryId);
-        let duplicate: SimilarHit | undefined;
-        let hints: SimilarMemoryHint[] = [];
-        if (similarHits === null) {
-          // embedding 失败：语义去重与相似提示跳过；更新本身有 Auditor diff/冲突审计兜底，继续走审计
-          logger.audit.warn("向量召回不可用，更新跳过语义去重与相似提示", {
-            memoryId: event.memoryId,
-          });
-        } else {
-          duplicate = similarHits.find((h) => h.similarity >= VECTOR_DEDUP_SIMILARITY);
-          hints = similarHits
-            .filter((h) => h.similarity >= SIMILAR_HINT_MIN_SIMILARITY)
-            .map((h) => ({ title: h.title, summary: h.summary, similarity: h.similarity }));
-        }
-        if (duplicate) {
-          event.status = "rejected";
-          event.decisionReasonCode = "VECTOR_DUPLICATE";
-          event.decisionReason = `与现有记忆《${duplicate.title}》高度相似（${(
-            duplicate.similarity * 100
-          ).toFixed(1)}%），拒绝入库`;
-          this.memoryService.updateEvent(event);
-          await this.recordQualityFailure(event, "vector-dedup", new Error(event.decisionReason));
-          return;
-        }
-        const filterResult = await this.qualityFilter.filter(candidate, hints);
-        if (filterResult.verdict === "reject") {
-          event.status = "rejected";
-          event.decisionReasonCode = "QUALITY_REJECTED";
-          event.decisionReason = filterResult.reason || "质量未达标";
-          this.memoryService.updateEvent(event);
-          await this.recordQualityFailure(event, "quality-filter", new Error(event.decisionReason));
-          return;
-        }
-        if (filterResult.verdict === "review") {
-          updateQualityReview = true;
-          logger.audit.warn("更新内容质量存疑，禁用 auto_merge，转人工冲突裁决", {
-            memoryId: event.memoryId,
-            reason: filterResult.reason,
-          });
-        }
       }
 
       // 更新路径：由 Auditor.process → dequeueEvent 原子声明（pending → processing）。
@@ -359,36 +314,6 @@ export class Orchestrator {
       if (auditResult.status === "done") {
         const resolution = auditResult.resolution;
         if (resolution && resolution.action === "auto_merge") {
-          if (updateQualityReview) {
-            // 质量存疑的更新禁 auto_merge：不写回任何变更，逐字段生成冲突转人工裁决
-            // （对比 candidate 与 existing —— 人工裁决的正是"这次更新想改什么"）
-            const changedFields = event.changedFields.filter((field) => {
-              if (
-                field === "version" ||
-                field === "id" ||
-                field === "createdAt" ||
-                field === "updatedAt"
-              ) {
-                return false;
-              }
-              const key = field as keyof MemoryRecord;
-              return JSON.stringify(candidate[key]) !== JSON.stringify(existing[key]);
-            });
-            for (const field of changedFields) {
-              const key = field as keyof MemoryRecord;
-              this.auditService.createConflict(
-                event.memoryId,
-                event.eventId,
-                field,
-                existing[key],
-                candidate[key],
-              );
-            }
-            event.status = "done";
-            this.memoryService.updateEvent(event);
-            return;
-          }
-
           const merged = resolution.merged;
           this.memoryService.updateMemory(event.memoryId, merged);
 
@@ -446,6 +371,28 @@ export class Orchestrator {
         this.memoryService.updateEvent(event);
       }
     } catch (error) {
+      if (error instanceof ModelDependencyError) {
+        const attempts = (event.dependency?.attempts ?? 0) + 1;
+        const delay = dependencyConfig.retryDelaysMs[attempts - 1];
+        const paused =
+          delay === undefined ||
+          ["NOT_CONFIGURED", "DISABLED", "AUTH_FAILED"].includes(error.reason);
+        event.status = "waiting_dependency";
+        event.decisionReasonCode = error.reason;
+        event.decisionReason = error.message;
+        event.dependency = {
+          slot: error.slot,
+          stage: error.stage,
+          reason: error.reason,
+          attempts,
+          lastAttemptAt: new Date().toISOString(),
+          nextAttemptAt: paused ? undefined : new Date(Date.now() + delay).toISOString(),
+          paused,
+          configFingerprint: KnowledgeModelAdapter.configurationFingerprint(error.slot),
+        };
+        this.memoryService.updateEvent(event);
+        return;
+      }
       event.status = "failed";
       event.retryCount++;
       this.memoryService.updateEvent(event);
@@ -461,13 +408,23 @@ export class Orchestrator {
     candidate: MemoryRecord,
   ): Promise<MemoryRecord> {
     const suggestedTopic = candidate.topic || "uncategorized";
-    const result = await this.topicClassification.classify({
-      title: candidate.title,
-      summary: candidate.summary,
-      content: candidate.content,
-      suggestedTopic,
-    });
-    if (candidate.topic === result.topic) return candidate;
+    const checkpoints = new ProcessingCheckpoints();
+    const result =
+      checkpoints.read<Awaited<ReturnType<TopicClassificationService["classify"]>>>(
+        event,
+        candidate,
+        "topic",
+      ) ??
+      (await this.topicClassification.classify({
+        title: candidate.title,
+        summary: candidate.summary,
+        content: candidate.content,
+        suggestedTopic,
+      }));
+    if (candidate.topic === result.topic) {
+      if (result.source === "model") checkpoints.write(event, candidate, "topic", result);
+      return candidate;
+    }
 
     const zhFields = generateZhFields(
       candidate.title,
@@ -484,6 +441,7 @@ export class Orchestrator {
     event.candidate = JSON.stringify(reviewed);
     event.changedFields = changedFields;
     this.memoryService.updateEventCandidate(event.eventId, reviewed, changedFields);
+    if (result.source === "model") checkpoints.write(event, reviewed, "topic", result);
     return reviewed;
   }
 
@@ -621,14 +579,15 @@ export class Orchestrator {
     content: string,
     excludeMemoryId?: string,
   ): Promise<SimilarHit[] | null> {
-    if (KnowledgeModelAdapter.isDegradedMode || !content) return null;
+    if (!content) return null;
 
     try {
-      const { embedding } = await KnowledgeModelAdapter.generateEmbedding(content);
+      const { embedding, model } = await KnowledgeModelAdapter.generateEmbedding(content);
+      if (embedding.length === 0) return null;
       const vectorIndex = new VectorIndex();
       try {
         return vectorIndex
-          .search(embedding, RECALL_TOP_K)
+          .search(embedding, RECALL_TOP_K, model)
           .filter((hit) => hit.memoryId !== excludeMemoryId)
           .map((hit) => {
             const memory = this.memoryService.getMemory(hit.memoryId);
@@ -709,65 +668,64 @@ export class Orchestrator {
     event: PendingEvent,
     candidate: MemoryRecord,
   ): Promise<string | undefined> {
-    // 全入口统一的向量语义去重（processIngest 的 Jaccard 是写前快筛，此处兜底改写型重复）
+    const baseline = this.memoryService.getMemory(event.memoryId);
     const similarHits = await this.recallSimilarMemories(candidate.content, event.memoryId);
-    if (similarHits === null) {
-      // fail-closed：embedding 失败时无法做语义去重，重复内容可能绕过保护静默入库 → 转人工
-      event.status = "review";
-      event.decisionReasonCode = "VECTOR_RECALL_UNAVAILABLE";
-      event.decisionReason = "向量召回不可用，无法进行语义去重，转人工裁决";
-      this.memoryService.updateEvent(event);
-      await this.recordQualityFailure(event, "vector-recall", new Error(event.decisionReason));
-      return;
-    }
-    const duplicate = similarHits.find((h) => h.similarity >= VECTOR_DEDUP_SIMILARITY);
-    if (duplicate) {
-      event.status = "rejected";
-      event.decisionReasonCode = "VECTOR_DUPLICATE";
-      event.decisionReason = `与现有记忆《${duplicate.title}》高度相似（${(
-        duplicate.similarity * 100
-      ).toFixed(1)}%），拒绝入库`;
-      this.memoryService.updateEvent(event);
-      await this.recordQualityFailure(event, "vector-dedup", new Error(event.decisionReason));
-      return;
-    }
-
-    // 质量闸门：注入相似记忆上下文，让 LLM 能判断新颖性（是否与库内已有知识重合）
-    const hints: SimilarMemoryHint[] = similarHits
-      .filter((h) => h.similarity >= SIMILAR_HINT_MIN_SIMILARITY)
-      .map((h) => ({ title: h.title, summary: h.summary, similarity: h.similarity }));
-    const filterResult = await this.qualityFilter.filter(candidate, hints);
-    if (filterResult.verdict !== "accept") {
-      // reject → 终态拒绝不重试；review → 挂起待人工裁决（均不进 failed 重试循环）
-      event.status = filterResult.verdict === "reject" ? "rejected" : "review";
-      event.decisionReasonCode =
-        filterResult.verdict === "reject" ? "QUALITY_REJECTED" : "QUALITY_REVIEW_REQUIRED";
-      event.decisionReason = filterResult.reason || "质量未达标";
-      this.memoryService.updateEvent(event);
-      await this.recordQualityFailure(event, "quality-filter", new Error(event.decisionReason));
-      return;
-    }
-
-    // 闸门判定的记忆类型回填到候选（非 fact 已在闸门内转为 review，不会走到这里）
-    candidate.kind = filterResult.kind;
+    const hints: SimilarMemoryHint[] =
+      similarHits === null
+        ? this.keywordHints(candidate)
+        : similarHits
+            .filter((h) => h.similarity >= SIMILAR_HINT_MIN_SIMILARITY)
+            .map((h) => ({ title: h.title, summary: h.summary, similarity: h.similarity }));
+    const checkpoints = new ProcessingCheckpoints();
 
     // 中文抽取拆卡：原文直存会是英文/raw markdown 大杂烩，这里按话题拆分并全文重写为中文。
     // 抽取失败 fail-closed 转人工，绝不把原文大杂烩静默落盘。
-    const cards = await this.extraction.extract(candidate, hints);
+    const cards =
+      checkpoints.read<ExtractedCard[]>(event, candidate, "extraction") ??
+      (await this.extraction.extract(candidate, hints));
     if (!cards || cards.length === 0) {
-      event.status = "review";
-      event.decisionReasonCode = "MEMORY_EXTRACTION_UNAVAILABLE";
-      event.decisionReason = "记忆抽取失败（模型输出异常或降级），转人工裁决";
-      this.memoryService.updateEvent(event);
-      await this.recordQualityFailure(event, "memory-extraction", new Error(event.decisionReason));
-      return;
+      throw new ModelDependencyError(
+        "flagship",
+        "extraction",
+        KnowledgeModelAdapter.dependencyReason("flagship") ?? "INVALID_OUTPUT",
+      );
     }
 
+    checkpoints.write(event, candidate, "extraction", cards);
+    const latest = this.memoryService.getMemory(event.memoryId);
+    if (
+      checkpoints.isSuperseded(event) ||
+      latest?.updatedAt !== baseline?.updatedAt ||
+      latest?.version !== baseline?.version
+    ) {
+      event.status = "pending";
+      event.decisionReasonCode = "STALE_CONTENT_VERSION";
+      event.decisionReason = "加工期间已有内容变更，重新处理最新内容";
+      this.memoryService.updateEvent(event);
+      return;
+    }
     const anchorId = await this.commitExtractedCards(event, candidate, cards);
+    if (baseline?.evidence?.sourceHash)
+      await this.deleteExtractedCards(event.memoryId, cards.length + 1);
 
     event.status = "done";
     this.memoryService.updateEvent(event);
     return anchorId;
+  }
+
+  private keywordHints(candidate: MemoryRecord): SimilarMemoryHint[] {
+    const terms = candidate.content.match(/[\p{L}\p{N}]+/gu) ?? [];
+    const hits: Array<SimilarMemoryHint & { matches: number }> = [];
+    for (let offset = 0; ; offset += DEDUP_SCAN_BATCH_SIZE) {
+      const records = this.memoryService.listMemories({ limit: DEDUP_SCAN_BATCH_SIZE, offset });
+      for (const memory of records) {
+        if (memory.id === candidate.id) continue;
+        const matches = terms.filter((term) => memory.content.includes(term)).length;
+        if (matches > 0) hits.push({ title: memory.title, summary: memory.summary, matches });
+      }
+      if (records.length < DEDUP_SCAN_BATCH_SIZE) break;
+    }
+    return hits.sort((a, b) => b.matches - a.matches).slice(0, RECALL_TOP_K);
   }
 
   private async commitOptimizedNewMemory(
@@ -812,7 +770,20 @@ export class Orchestrator {
           sourceHash: hash,
         },
       };
-      await this.memoryService.createMemoryRecord(record);
+      const previous = this.memoryService.getMemory(id);
+      if (previous) {
+        const versions = new VersionManager();
+        try {
+          if (!versions.getSnapshot(id, previous.version))
+            versions.createSnapshot(previous, previous.version);
+        } finally {
+          versions.close();
+        }
+        this.memoryService.updateMemory(id, { ...record, version: previous.version + 1 });
+        await this.refreshVector(id, record.content);
+      } else {
+        await this.memoryService.createMemoryRecord(record);
+      }
       // 分类是派生信息：失败只记日志，不影响已入库的记忆
       try {
         this.memoryService.classifyMemory(id, card.content);
@@ -851,9 +822,9 @@ export class Orchestrator {
   }
 
   /** 删除一次抽取的全部历史卡片（首卡 + -p 后缀分卡），用于来源内容变更后的整体重建 */
-  private async deleteExtractedCards(anchorId: string): Promise<void> {
-    const ids = [anchorId];
-    for (let i = 2; i <= 32; i++) {
+  private async deleteExtractedCards(anchorId: string, startIndex = 1): Promise<void> {
+    const ids = startIndex === 1 ? [anchorId] : [];
+    for (let i = Math.max(startIndex, 2); i <= 32; i++) {
       const id = `${anchorId}-p${i}`;
       if (!this.memoryService.getMemory(id)) break;
       ids.push(id);
@@ -1119,7 +1090,7 @@ export class Orchestrator {
   retryFailedEvents(): number {
     const memory = this.memoryService;
     // 导出接口：listPendingEvents 返回完整列表供重试用
-    const pending = memory.getPendingEvents();
+    const pending = memory.getEventsByStatus("failed", dependencyConfig.batchSize);
     let retried = 0;
 
     for (const event of pending) {

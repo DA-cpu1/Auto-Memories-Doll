@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
+import DependencyPanel from "./DependencyPanel";
 
 type ConflictRecord = {
   conflictId: string;
@@ -154,6 +155,8 @@ export default function AuditPanel() {
           刷新
         </button>
       </header>
+
+      <DependencyPanel onQueueChanged={load} />
 
       <nav
         aria-label="审核视图"

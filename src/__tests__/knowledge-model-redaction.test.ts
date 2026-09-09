@@ -50,10 +50,9 @@ describe("KnowledgeModelAdapter secret boundary", () => {
   it("fails closed without making a network request when no LLM key is configured", async () => {
     mocks.config.apiKey = "";
 
-    const response = await KnowledgeModelAdapter.generate("offline prompt", "budget");
-
-    expect(response.finishReason).toBe("degraded");
-    expect(response.content).toContain("离线模式");
+    await expect(KnowledgeModelAdapter.generate("offline prompt", "budget")).rejects.toMatchObject({
+      reason: "NOT_CONFIGURED",
+    });
     expect(mocks.generateText).not.toHaveBeenCalled();
   });
 });

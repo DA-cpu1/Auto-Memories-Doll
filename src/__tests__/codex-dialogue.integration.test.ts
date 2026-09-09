@@ -7,6 +7,7 @@ import { createSourceRevisionEvent } from "../lib/source/source-revision";
 import { KnowledgeModelAdapter } from "../lib/ai/knowledge-model-adapter";
 import { KnowledgeAgent } from "../server/services/knowledge-agent";
 import { MemoryService } from "../server/services/memory-service";
+import { QualityFilterService } from "../server/services/quality-filter-service";
 import { SourceRegistry } from "../server/services/source-registry";
 import { listenStatusAgentSchema } from "../config/api-route-contracts";
 import type { ToolWatchSource } from "../types/config";
@@ -59,6 +60,10 @@ describe.sequential("Codex storage and model boundary", () => {
   });
 
   it("publishes only allowed content; noise and restart produce no model calls or writes", async () => {
+    vi.spyOn(QualityFilterService.prototype, "filter").mockResolvedValue({
+      verdict: "review",
+      reason: "证据不足",
+    });
     const generate = vi.spyOn(KnowledgeModelAdapter, "generate").mockResolvedValue({
       content: "{}",
       finishReason: "degraded",
@@ -229,7 +234,7 @@ describe.sequential("Codex storage and model boundary", () => {
     expect(embed).toHaveBeenCalled();
     expect(JSON.stringify(generate.mock.calls)).not.toContain(sentinel);
     expect(JSON.stringify(embed.mock.calls)).not.toContain(sentinel);
-    expect(new MemoryService().getEventsByStatus("review")).toHaveLength(1);
+    expect(new MemoryService().getEventsByStatus("waiting_dependency")).toHaveLength(1);
     agent.close();
   });
 });

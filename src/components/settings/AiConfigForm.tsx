@@ -117,6 +117,7 @@ export default function AiConfigForm({
           apiKey: form.apiKey,
           model: form.standard?.model || form.flagship?.model || "gpt-4o-mini",
           embedding: {
+            enabled: form.embedding.enabled !== false,
             apiKey: form.embedding.apiKey,
             baseURL: form.embedding.baseURL,
             model: form.embedding.model || "text-embedding-3-small",
@@ -141,8 +142,6 @@ export default function AiConfigForm({
       });
     } finally {
       setTesting(false);
-      // 5秒后自动清除结果
-      setTimeout(() => setTestResult(null), 5000);
     }
   };
 
@@ -150,6 +149,7 @@ export default function AiConfigForm({
     key: K,
     value: AiConfig[K],
   ) => {
+    setTestResult(null);
     setForm((prev) => {
       if (key === "provider") {
         return {
@@ -162,6 +162,7 @@ export default function AiConfigForm({
   };
 
   const updateTier = (slot: ChatSlot, key: keyof ModelTierConfig, value: string | number) => {
+    setTestResult(null);
     setForm((prev) => ({
       ...prev,
       [slot]: { ...(prev[slot] as ModelTierConfig), [key]: value },
@@ -169,6 +170,7 @@ export default function AiConfigForm({
   };
 
   const updateEmbedding = <K extends keyof EmbeddingConfig>(key: K, value: EmbeddingConfig[K]) => {
+    setTestResult(null);
     setForm((prev) => ({
       ...prev,
       embedding: { ...prev.embedding, [key]: value },
@@ -281,6 +283,14 @@ export default function AiConfigForm({
       <div className="border border-border-subtle rounded-lg p-4 space-y-3">
         <div>
           <h4 className="text-sm font-semibold text-text-primary">Embedding 模型</h4>
+          <label className="flex items-center gap-2 text-sm">
+            <input
+              type="checkbox"
+              checked={form.embedding.enabled !== false}
+              onChange={(e) => updateEmbedding("enabled", e.target.checked)}
+            />
+            启用语义检索与向量生成
+          </label>
           <p className="text-xs text-text-secondary mt-0.5">
             向量生成与检索 — 批量处理场景，建议高并发
           </p>

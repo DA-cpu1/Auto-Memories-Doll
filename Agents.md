@@ -687,6 +687,7 @@ export type ConflictRecord = {
 
 | 偏差项 | AGENTS.md 描述 | 实际代码 | 优先级 |
 |--------|---------------|---------|--------|
+| Embedding 故障阻塞加工并堆积人工审核 | [LKA-003](docs/specs/003-embedding-degradation/spec.md) 要求 Embedding 可选、能力独立降级、纯服务故障进入持久化等待 | 已修复（LKA-003 首次交付）：独立槽位退避、Embedding 开关、关键词降级、waiting_dependency、20 条恢复批次、加工检查点、版本保护、向量补建及旧队列预览重处理已实现。运行数据未迁移；证据见交付报告 | ~~P1~~ |
 | Codex 采集包含非最终对话事件 | [LKA-002](docs/specs/002-codex-final-dialogue/spec.md) 要求只采集真实用户输入与每轮 AI 最终回答 | 已修复（LKA-002）：独立 schema 白名单、消息身份去重、未完成轮次等待、同字节快照、噪声无操作及来源诊断已接入；439 条单元/集成测试与 5 条 E2E 通过。旧数据不自动清洗，见交付报告 | ~~P1~~ |
 | 队列存储路径 | `src/lib/storage/queue.ts`（第 4.6 节旧版描述） | 已修复：删除 `src/features/audit/queue.ts`（内存 Map），Auditor 统一使用 MemoryService SQLite 队列；dequeueEvent 事务化（悲观锁） | ~~P1~~ |
 | 图谱存储方式 | 第 4.6 节仅描述 `graph_edges` SQLite 表 | 已修复：删除 `manager.ts` 和 `query.ts`，唯一路径为 `wiki-graph.ts` | ~~P2~~ |
@@ -887,6 +888,21 @@ Phase 8 — 验证和作品集交付
 - [x] 实现真实用户消息筛选、最终阶段判定、轮次等待及镜像去重。
 - [x] 接入知识循环、噪声追加无操作、最小诊断与来源显示名。
 - [x] 完成全链路验收与门禁，记录旧数据不自动清洗的发布边界，详见 [LKA-002 交付报告](docs/specs/002-codex-final-dialogue/delivery.md)。
+
+### LKA-003 后续路线图（已实施）
+
+规范入口：[Embedding 可选与故障等待分离](docs/specs/003-embedding-degradation/spec.md)。实现与验收见 [交付报告](docs/specs/003-embedding-degradation/delivery.md)，未执行真实旧队列迁移。
+
+本节替代本文历史记录中“Embedding 单独失败转人工”和“纯模型故障一律转人工”的策略。无有效质量判断仍不发布；内容疑点和字段冲突仍须人工裁决。队列新增 `waiting_dependency` 与持久化 `dependency` 元数据；恢复使用 1/5/20 分钟、最多三次自动重试，每批至多 20 条。`processing_checkpoints` 保存按候选/模型/策略版本绑定的加工结果；`content_references` 保留跨来源精确重复关系；`vector_jobs` 独立记录已发布知识的向量状态；`recovery_batches/recovery_items` 保存预览与重处理审计信息。
+
+- [x] 明确可选向量、能力独立降级、服务等待与人工审核的边界。
+- [x] 定义旧故障审核积压的预览、筛选版本校验及幂等重处理要求。
+- [x] 完成技术设计与开发任务清单，确定状态迁移、恢复调度和 API 契约。
+- [x] 实现关键词降级加工、服务等待、独立健康检查及向量补建。
+- [x] 实现旧队列可预览重处理和 UI 分类计数，完成验收与门禁。
+- [x] 修复批量确认入口被长列表遮蔽：移至审核页顶部、自动恢复持久化预览、带数量的实色确认按钮与提交进度刷新；326 条模拟候选的桌面/手机点击流程通过。
+- [x] 修复连接测试误发脱敏 Key：按保存端点与凭据还原共享/独立 Key，拒绝向更改的测试端点发送保存密钥，明确显示 HTTP 200 内的提供商业务错误；页面按钮与回归测试验证通过。
+- [x] 修复 MiniMax 思考段污染质量 JSON：质量/抽取/话题解析只消费最终 JSON，拒绝思考示例与截断响应，SDK 使用配置输出预算；真实合成复现、44 条定向测试和已恢复候选的 Markdown 发布验证通过。
 
 ### LKA-001 及此前记录
 

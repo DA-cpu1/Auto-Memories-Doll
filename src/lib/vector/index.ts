@@ -97,16 +97,22 @@ export class VectorIndex {
     this.searchBackend.delete(memoryId, previous ? rowFromRecord(previous) : null);
   }
 
-  search(embedding: number[], limit: number): { memoryId: string; similarity: number }[] {
+  search(
+    embedding: number[],
+    limit: number,
+    model?: string,
+  ): { memoryId: string; similarity: number }[] {
+    const compatible = (hits: { memoryId: string; similarity: number }[]) =>
+      model ? hits.filter((hit) => this.read(hit.memoryId)?.model === model) : hits;
     try {
-      return this.searchBackend.search(embedding, limit);
+      return compatible(this.searchBackend.search(embedding, limit));
     } catch (error) {
       if (this.searchBackend.name === "js-exact") throw error;
 
       logger.vector.warn("HNSW 查询失败，本次请求降级为 JS 精确检索", {
         error: (error as Error).message,
       });
-      return createVectorSearchBackend(this.db, "js").search(embedding, limit);
+      return compatible(createVectorSearchBackend(this.db, "js").search(embedding, limit));
     }
   }
 

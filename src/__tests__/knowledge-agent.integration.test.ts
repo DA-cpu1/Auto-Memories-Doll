@@ -7,6 +7,7 @@ import { createSourceRevisionEvent } from "../lib/source/source-revision";
 import { KnowledgeModelAdapter } from "../lib/ai/knowledge-model-adapter";
 import { KnowledgeAgent } from "../server/services/knowledge-agent";
 import { MemoryService } from "../server/services/memory-service";
+import { QualityFilterService } from "../server/services/quality-filter-service";
 
 const memoryRoot = process.env.MEMORY_ROOT!;
 
@@ -125,7 +126,11 @@ describe.sequential("KnowledgeAgent source orchestration", () => {
     afterRestart.close();
   });
 
-  it("owns queue processing and emits a waiting review state when the model is degraded", async () => {
+  it("owns queue processing and emits a review state for content uncertainty", async () => {
+    vi.spyOn(QualityFilterService.prototype, "filter").mockResolvedValue({
+      verdict: "review",
+      reason: "证据不足",
+    });
     vi.spyOn(KnowledgeModelAdapter, "isDegradedMode", "get").mockReturnValue(true);
     const sourcePath = join(memoryRoot, "imports", "needs-review.md");
     const content = "# Needs review\n\n模型不可用时，这条候选不能默认发布。";
@@ -171,8 +176,8 @@ describe.sequential("KnowledgeAgent source orchestration", () => {
       expect.objectContaining({
         stage: "review",
         outcome: "waiting",
-        errorCode: "VECTOR_RECALL_UNAVAILABLE",
-        error: expect.stringContaining("向量召回不可用"),
+        errorCode: "QUALITY_REVIEW_REQUIRED",
+        error: expect.stringContaining("证据不足"),
       }),
     ]);
     agent.close();

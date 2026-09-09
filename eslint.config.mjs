@@ -5,7 +5,15 @@ import prettier from "eslint-config-prettier";
 
 export default tseslint.config(
   {
-    ignores: [".next/**", "coverage/**", "node_modules/**", "memory-root/**", "dist/**"],
+    ignores: [
+      ".next/**",
+      "coverage/**",
+      "node_modules/**",
+      "memory-root/**",
+      "dist/**",
+      "e2e/.tmp/**",
+      "tmp/**",
+    ],
   },
   js.configs.recommended,
   ...tseslint.configs.recommended,

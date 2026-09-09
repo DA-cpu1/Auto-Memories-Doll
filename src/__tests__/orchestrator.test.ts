@@ -142,8 +142,19 @@ vi.mock("../lib/vector/generator", () => ({
 }));
 
 // ── mock: knowledge model boundary（recallSimilarMemories 依赖） ──
+vi.mock("../server/services/processing-checkpoints", () => ({
+  ProcessingCheckpoints: vi.fn(() => ({
+    isSuperseded: () => false,
+    exactDuplicate: () => undefined,
+    read: () => undefined,
+    write: vi.fn(),
+    recordReference: vi.fn(),
+  })),
+}));
 vi.mock("../lib/ai/knowledge-model-adapter", () => ({
   KnowledgeModelAdapter: {
+    dependencyReason: vi.fn(() => undefined),
+    configurationFingerprint: vi.fn(() => "test-config"),
     isDegradedMode: false,
     generateEmbedding: vi.fn(() =>
       Promise.resolve({ embedding: [0.1], model: "test", timestamp: "2026-01-01" }),
@@ -624,10 +635,11 @@ describe("Orchestrator", () => {
       );
     });
 
-    it("新建路径向量召回不可用（embedding 失败）→ fail-closed 转人工 review", async () => {
+    it("新建路径向量召回不可用仍执行质量检查并发布", async () => {
       const event = { ...builderMock.pendingEvent, eventType: "ingest", retryCount: 0 };
       memoryServiceStub.getPendingEvents.mockReturnValue([event]);
       memoryServiceStub.getMemory.mockReturnValue(null);
+      memoryServiceStub.listMemories.mockReturnValue([]);
 
       const modelAdapter = await import("../lib/ai/knowledge-model-adapter");
       vi.mocked(modelAdapter.KnowledgeModelAdapter.generateEmbedding).mockRejectedValueOnce(
@@ -636,28 +648,16 @@ describe("Orchestrator", () => {
 
       await orchestrator.processQueue();
 
-      expect(event.status).toBe("review");
+      expect(event.status).toBe("done");
       expect(event.retryCount).toBe(0);
-      expect(event).toMatchObject({
-        decisionReasonCode: "VECTOR_RECALL_UNAVAILABLE",
-        decisionReason: expect.stringContaining("向量召回不可用"),
-      });
-      expect(memoryServiceStub.createMemoryRecord).not.toHaveBeenCalled();
-      const fileManager = await import("../lib/storage/file-manager");
-      expect(fileManager.createFailureRecord).toHaveBeenCalledWith(
-        "test-id",
-        "vector-recall",
-        expect.any(Error),
-      );
+      expect(memoryServiceStub.createMemoryRecord).toHaveBeenCalled();
     });
 
     it("派生存储同步失败（写 Markdown 抛错）→ 记忆已入库、事件仍 done、归档失败记录", async () => {
       const event = { ...builderMock.pendingEvent, eventType: "ingest", retryCount: 0 };
       memoryServiceStub.getPendingEvents.mockReturnValue([event]);
       // 第一次 getMemory（存在性检查）→ 不存在；commitNewMemory 内取回刚入库的记录
-      memoryServiceStub.getMemory
-        .mockReturnValueOnce(null)
-        .mockReturnValue({ ...builderMock.memoryRecord });
+      memoryServiceStub.getMemory.mockReturnValue(null);
       memoryServiceStub.createMemoryRecord.mockResolvedValue("test-id");
       memoryServiceStub.listMemories.mockReturnValue([]);
 
@@ -682,9 +682,7 @@ describe("Orchestrator", () => {
     it("分类失败（classifyMemory 抛错）→ 记忆已入库、事件仍 done", async () => {
       const event = { ...builderMock.pendingEvent, eventType: "ingest", retryCount: 0 };
       memoryServiceStub.getPendingEvents.mockReturnValue([event]);
-      memoryServiceStub.getMemory
-        .mockReturnValueOnce(null)
-        .mockReturnValue({ ...builderMock.memoryRecord });
+      memoryServiceStub.getMemory.mockReturnValue(null);
       memoryServiceStub.createMemoryRecord.mockResolvedValue("test-id");
       memoryServiceStub.listMemories.mockReturnValue([]);
       memoryServiceStub.classifyMemory.mockImplementation(() => {
@@ -795,7 +793,7 @@ describe("Orchestrator", () => {
       expect(memoryServiceStub.classifyMemory).toHaveBeenCalledTimes(3);
     });
 
-    it("抽取失败（LLM 输出异常）→ fail-closed 转人工 review，不落盘", async () => {
+    it("抽取失败进入模型服务等待，不落盘", async () => {
       const event = { ...builderMock.pendingEvent, eventType: "ingest", retryCount: 0 };
       memoryServiceStub.getPendingEvents.mockReturnValue([event]);
       memoryServiceStub.getMemory.mockReturnValue(null);
@@ -803,19 +801,13 @@ describe("Orchestrator", () => {
 
       await orchestrator.processQueue();
 
-      expect(event.status).toBe("review");
+      expect(event.status).toBe("waiting_dependency");
       expect(event.retryCount).toBe(0);
       expect(event).toMatchObject({
-        decisionReasonCode: "MEMORY_EXTRACTION_UNAVAILABLE",
-        decisionReason: expect.stringContaining("记忆抽取失败"),
+        decisionReasonCode: "INVALID_OUTPUT",
+        decisionReason: expect.stringContaining("模型服务等待"),
       });
       expect(memoryServiceStub.createMemoryRecord).not.toHaveBeenCalled();
-      const fileManager = await import("../lib/storage/file-manager");
-      expect(fileManager.createFailureRecord).toHaveBeenCalledWith(
-        "test-id",
-        "memory-extraction",
-        expect.any(Error),
-      );
     });
   });
 

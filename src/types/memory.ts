@@ -134,7 +134,18 @@ export type PendingEvent = {
    * - rejected：质量闸门或向量去重终拒，不参与重试
    * - review：闸门不可用或评分存疑，待人工裁决，不被自动消费
    */
-  status: "pending" | "processing" | "done" | "failed" | "rejected" | "review";
+  status:
+    "pending" | "processing" | "done" | "failed" | "rejected" | "review" | "waiting_dependency";
+  dependency?: {
+    slot: "flagship" | "standard" | "budget" | "embedding";
+    stage: string;
+    reason: string;
+    attempts: number;
+    lastAttemptAt: string;
+    nextAttemptAt?: string;
+    paused: boolean;
+    configFingerprint: string;
+  };
   retryCount: number;
   /** 自动判定的稳定代码与用户可读原因；人工裁决前必须保留。 */
   decisionReasonCode?: string;

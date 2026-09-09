@@ -31,6 +31,9 @@ import type { NormalizationReport, SourceChunk } from "../../types/normalization
 import { MemoryService } from "./memory-service";
 import { Orchestrator } from "./orchestrator";
 import { SourceRegistry } from "./source-registry";
+import { dependencyConfig } from "../../config/dependency.config";
+import { VectorBackfill } from "./vector-backfill";
+import { DependencyRecovery } from "./dependency-recovery";
 
 export type SourceRevisionInput = {
   event: SourceRevisionEvent;
@@ -93,6 +96,7 @@ type ProgressRow = {
 const inFlightSourceRevisions = new Map<string, Promise<SourceRevisionIngestResult>>();
 
 export class KnowledgeAgent {
+  private static processingQueue = false;
   private readonly db: Database.Database;
   private readonly memoryService: MemoryService;
   private readonly sourceRegistry: SourceRegistry;
@@ -279,7 +283,22 @@ export class KnowledgeAgent {
   }
 
   async processQueue(): Promise<void> {
-    const pendingEvents = this.memoryService.getPendingEvents({ limit: 100 });
+    if (KnowledgeAgent.processingQueue) return;
+    KnowledgeAgent.processingQueue = true;
+    try {
+      await this.processQueueBatch();
+    } finally {
+      KnowledgeAgent.processingQueue = false;
+    }
+  }
+
+  private async processQueueBatch(): Promise<void> {
+    new DependencyRecovery().resumeBatches();
+    await new VectorBackfill().run();
+    this.resumeDependencies();
+    const pendingEvents = this.memoryService.getPendingEvents({
+      limit: dependencyConfig.batchSize,
+    });
     const tracked: Array<{
       event: (typeof pendingEvents)[number];
       sourceEvent: SourceRevisionEvent;
@@ -335,6 +354,20 @@ export class KnowledgeAgent {
           this.transition(sourceEvent, current, "done", startedAt, event.memoryId);
           break;
         }
+        case "waiting_dependency":
+          this.transition(
+            sourceEvent,
+            "processing",
+            "waiting_dependency",
+            startedAt,
+            event.memoryId,
+            "waiting",
+            progressFailure(
+              persisted.decisionReasonCode ?? "MODEL_UNAVAILABLE",
+              persisted.decisionReason ?? "等待模型服务",
+            ),
+          );
+          break;
         case "review":
           this.transition(
             sourceEvent,
@@ -396,6 +429,31 @@ export class KnowledgeAgent {
       return orchestrator.retryFailedEvents();
     } finally {
       orchestrator.close();
+    }
+  }
+
+  private resumeDependencies(): void {
+    let resumed = 0;
+    for (const event of this.memoryService.getEventsByStatus("waiting_dependency")) {
+      const dependency = event.dependency;
+      if (!dependency) continue;
+      const changed =
+        dependency.configFingerprint !==
+        KnowledgeModelAdapter.configurationFingerprint(dependency.slot);
+      if (
+        !changed &&
+        (dependency.paused ||
+          !dependency.nextAttemptAt ||
+          Date.parse(dependency.nextAttemptAt) > Date.now())
+      )
+        continue;
+      if (KnowledgeModelAdapter.dependencyReason(dependency.slot)) continue;
+      this.memoryService.updateEvent({
+        ...event,
+        status: "pending",
+        dependency: changed ? undefined : dependency,
+      });
+      if (++resumed >= dependencyConfig.batchSize) break;
     }
   }
 
@@ -998,7 +1056,8 @@ export class KnowledgeAgent {
   ): void {
     const latest = this.latestProgress(event.eventId);
     const attempt = latest
-      ? latest.stage === "failed_retryable" && stage !== "failed_retryable"
+      ? (latest.stage === "failed_retryable" || latest.stage === "waiting_dependency") &&
+        stage !== latest.stage
         ? latest.attempt + 1
         : latest.attempt
       : 1;

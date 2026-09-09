@@ -6,12 +6,13 @@ const ALLOWED_TRANSITIONS: Readonly<Record<AgentStage, readonly AgentStage[]>> =
   parsing: ["normalizing", "rejected", "failed_retryable"],
   normalizing: ["staged", "done", "rejected", "failed_retryable"],
   staged: ["processing", "failed_retryable"],
-  processing: ["accepted", "done", "review", "rejected", "failed_retryable"],
+  processing: ["accepted", "done", "review", "rejected", "failed_retryable", "waiting_dependency"],
+  waiting_dependency: ["processing", "rejected"],
   accepted: ["publishing", "failed_retryable"],
   publishing: ["indexed", "failed_retryable"],
   indexed: ["done", "failed_retryable"],
   done: [],
-  review: ["accepted", "rejected"],
+  review: ["accepted", "rejected", "processing"],
   rejected: [],
   failed_retryable: ["parsing", "staged", "processing", "publishing"],
 };
@@ -31,10 +32,11 @@ type PendingEventStatus = PendingEvent["status"];
 const ALLOWED_PENDING_EVENT_TRANSITIONS: Readonly<
   Record<PendingEventStatus, readonly PendingEventStatus[]>
 > = {
-  pending: ["processing", "failed", "rejected", "review"],
-  processing: ["done", "failed", "rejected", "review"],
+  pending: ["processing", "failed", "rejected", "review", "waiting_dependency"],
+  processing: ["done", "failed", "rejected", "review", "waiting_dependency"],
+  waiting_dependency: ["pending", "rejected"],
   failed: ["pending"],
-  review: ["processing", "rejected"],
+  review: ["pending", "processing", "rejected"],
   done: [],
   rejected: [],
 };

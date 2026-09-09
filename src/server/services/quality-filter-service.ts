@@ -1,19 +1,21 @@
 import { MemoryRecord, MemoryKind } from "../../types/memory";
 import { KnowledgeModelAdapter } from "../../lib/ai/knowledge-model-adapter";
 import { logger } from "../../lib/logger";
+import { ModelDependencyError } from "../../lib/ai/dependency-error";
+import { parseModelObject } from "../../lib/ai/model-json";
 
 /** 相似记忆提示：给闸门提供"库里已有什么"的参考上下文，用于判断新颖性 */
 export type SimilarMemoryHint = {
   title: string;
   summary: string;
-  similarity: number;
+  similarity?: number;
 };
 
 /**
- * 三态判定结果（fail-closed：闸门不可用时转人工，而不是放行）：
+ * 内容三态判定；模型依赖故障抛出 ModelDependencyError，由队列持久化等待。
  * - accept: 评分达标，直接入库
  * - reject: 明确低质，终态拒绝（不重试）
- * - review: 评分存疑、闸门不可用、非事实类或缺少证据，转人工裁决
+ * - review: 评分存疑、非事实类或缺少证据，转人工裁决
  * kind 为闸门判定的记忆类型（无法判定时缺省视为 fact）
  */
 export type QualityFilterResult =
@@ -41,31 +43,33 @@ export class QualityFilterService {
     candidate: MemoryRecord,
     similar: SimilarMemoryHint[] = [],
   ): Promise<QualityFilterResult> {
-    // 闸门不可用 → 转人工裁决，不放行（fail-closed）
-    if (KnowledgeModelAdapter.isDegradedMode) {
-      return { verdict: "review", reason: "质量闸门不可用（模型降级模式），转人工裁决" };
-    }
-
     const prompt = this.buildPrompt(candidate, similar);
 
     for (let attempt = 1; attempt <= MAX_PARSE_ATTEMPTS; attempt++) {
       try {
         const response = await KnowledgeModelAdapter.generate(prompt, "flagship");
+        if (response.finishReason === "length")
+          throw new ModelDependencyError("flagship", "quality", "OUTPUT_TRUNCATED");
+        if (response.finishReason === "degraded")
+          throw new ModelDependencyError(
+            "flagship",
+            "quality",
+            KnowledgeModelAdapter.dependencyReason("flagship") ?? "REQUEST_FAILED",
+          );
         const parsed = this.parseVerdict(response.content);
         if (parsed) return this.applyKindAndEvidenceRules(parsed, candidate);
         logger.quality.warn("质量闸门输出非标准 JSON，重试", {
           attempt,
-          output: response.content.slice(0, 200),
         });
       } catch (error) {
-        logger.quality.warn("质量过滤调用失败，转人工裁决", {
-          error: (error as Error).message,
-        });
-        break;
+        if (error instanceof ModelDependencyError)
+          throw new ModelDependencyError(error.slot, "quality", error.reason);
+        throw new ModelDependencyError("flagship", "quality", "REQUEST_FAILED");
       }
     }
 
-    return { verdict: "review", reason: "质量闸门输出异常，转人工裁决" };
+    KnowledgeModelAdapter.suppressInvalidOutput("flagship");
+    throw new ModelDependencyError("flagship", "quality", "INVALID_OUTPUT");
   }
 
   /**
@@ -109,13 +113,12 @@ export class QualityFilterService {
    * 返回 null 表示无法解析（由调用方决定重试或转人工）。
    */
   private parseVerdict(text: string): QualityFilterResult | null {
-    const match = text.match(/\{[\s\S]*\}/);
-    if (!match) return null;
+    const parsed = parseModelObject(text);
+    if (!parsed) return null;
 
     try {
-      const parsed = JSON.parse(match[0]) as { score?: unknown; kind?: unknown; reason?: unknown };
-      const score = Number(parsed.score);
-      if (!Number.isFinite(score)) return null;
+      const score = parsed.score;
+      if (typeof score !== "number" || !Number.isFinite(score)) return null;
 
       const reason = typeof parsed.reason === "string" ? parsed.reason.trim() : "";
       const rawKind = typeof parsed.kind === "string" ? parsed.kind.trim() : "";
@@ -149,9 +152,9 @@ export class QualityFilterService {
   private buildPrompt(candidate: MemoryRecord, similar: SimilarMemoryHint[]): string {
     const similarBlock = similar.length
       ? `\n知识库中与它最相似的已有条目：
-${similar.map((s, i) => `${i + 1}. 《${s.title}》（相似度 ${(s.similarity * 100).toFixed(0)}%）：${s.summary}`).join("\n")}
+${similar.map((s, i) => `${i + 1}. 《${s.title}》（${s.similarity === undefined ? "关键词参考，非语义等价证明" : `相似度 ${(s.similarity * 100).toFixed(0)}%`}）：${s.summary}`).join("\n")}
 `
-      : "";
+      : "\n未召回相似记录不证明语义新颖，仍须保守评估。";
 
     const evidenceBlock = candidate.evidence?.text
       ? `\n来源证据：${candidate.evidence.text.slice(0, 300)}${candidate.evidence.location ? `（位置：${candidate.evidence.location}）` : ""}

@@ -9,6 +9,7 @@ export type AgentStage =
   | "indexed"
   | "done"
   | "review"
+  | "waiting_dependency"
   | "rejected"
   | "failed_retryable";
 

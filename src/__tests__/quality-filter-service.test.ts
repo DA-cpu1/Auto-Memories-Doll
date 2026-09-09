@@ -3,6 +3,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 // ── mock knowledge model boundary ──
 vi.mock("../lib/ai/knowledge-model-adapter", () => ({
   KnowledgeModelAdapter: {
+    suppressInvalidOutput: vi.fn(),
     generate: vi.fn(),
     isDegradedMode: false,
   },
@@ -11,6 +12,7 @@ vi.mock("../lib/ai/knowledge-model-adapter", () => ({
 import { QualityFilterService } from "../server/services/quality-filter-service";
 import { MemoryRecord } from "../types/memory";
 import { KnowledgeModelAdapter } from "../lib/ai/knowledge-model-adapter";
+import { MemoryExtractionService } from "../server/services/memory-extraction-service";
 const ModelAdapter = KnowledgeModelAdapter;
 
 const makeCandidate = (overrides: Partial<MemoryRecord> = {}): MemoryRecord => ({
@@ -48,13 +50,48 @@ describe("QualityFilterService", () => {
     service = new QualityFilterService();
   });
 
-  it("降级模式 → review（fail-closed，转人工裁决）", async () => {
+  it("Embedding 降级不阻止可用的质量模型", async () => {
     (KnowledgeModelAdapter as any).isDegradedMode = true;
+    (ModelAdapter.generate as any).mockResolvedValue(llmReply({ score: 9 }));
 
     const result = await service.filter(makeCandidate());
 
-    expect(result.verdict).toBe("review");
-    expect(ModelAdapter.generate).not.toHaveBeenCalled();
+    expect(result.verdict).toBe("accept");
+    expect(ModelAdapter.generate).toHaveBeenCalled();
+  });
+
+  it("ignores a high score in thinking and uses the final lower score", async () => {
+    vi.mocked(ModelAdapter.generate).mockResolvedValue(
+      llmReply(
+        '<think>Example {"score":9}, Record<T, { title: string }></think>\n{"score":2,"kind":"fact","reason":"缺少知识"}',
+      ) as any,
+    );
+    await expect(service.filter(makeCandidate())).resolves.toMatchObject({
+      verdict: "reject",
+      score: 2,
+    });
+  });
+
+  it("does not accept valid-looking JSON from a truncated completion", async () => {
+    vi.mocked(ModelAdapter.generate).mockResolvedValue({
+      ...llmReply({ score: 9 }),
+      finishReason: "length",
+    } as any);
+    await expect(service.filter(makeCandidate())).rejects.toMatchObject({
+      reason: "OUTPUT_TRUNCATED",
+    });
+  });
+
+  it("extracts final cards rather than thinking examples", async () => {
+    vi.mocked(ModelAdapter.generate).mockResolvedValue(
+      llmReply(
+        '<think>{"memories":[{"title":"错误示例","content":"推理内容"}]}</think>\n{"memories":[{"title":"正式卡片","summary":"最终摘要","content":"有来源的最终知识","tags":["知识"]}]}',
+      ) as any,
+    );
+    const cards = await new MemoryExtractionService().extract(makeCandidate());
+    expect(cards).toEqual([
+      { title: "正式卡片", summary: "最终摘要", content: "有来源的最终知识", tags: ["知识"] },
+    ]);
   });
 
   it("score ≥ 7 → accept", async () => {
@@ -107,13 +144,14 @@ describe("QualityFilterService", () => {
     expect(result.verdict).toBe("accept");
   });
 
-  it("非标准输出 → 重试一次后仍失败 → review", async () => {
+  it("非标准输出有限重试后返回依赖故障", async () => {
     (ModelAdapter.generate as any).mockResolvedValue(llmReply("这是一个好记忆"));
 
-    const result = await service.filter(makeCandidate());
-
+    await expect(service.filter(makeCandidate())).rejects.toMatchObject({
+      reason: "INVALID_OUTPUT",
+      stage: "quality",
+    });
     expect(ModelAdapter.generate).toHaveBeenCalledTimes(2);
-    expect(result.verdict).toBe("review");
   });
 
   it("第一次输出异常、第二次正常 → 返回正常判定", async () => {
@@ -126,12 +164,12 @@ describe("QualityFilterService", () => {
     expect(result.verdict).toBe("accept");
   });
 
-  it("API 调用异常 → review（不再放行）", async () => {
+  it("API 调用异常返回服务依赖故障", async () => {
     (ModelAdapter.generate as any).mockRejectedValue(new Error("Network error"));
 
-    const result = await service.filter(makeCandidate());
-
-    expect(result.verdict).toBe("review");
+    await expect(service.filter(makeCandidate())).rejects.toMatchObject({
+      reason: "REQUEST_FAILED",
+    });
   });
 
   it("相似记忆提示注入 prompt（新颖性判断上下文）", async () => {

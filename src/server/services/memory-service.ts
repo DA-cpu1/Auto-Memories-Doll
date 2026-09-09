@@ -99,6 +99,7 @@ export class MemoryService {
       "sourceRevision",
       "decisionReasonCode",
       "decisionReason",
+      "dependency",
     ]) {
       try {
         this.db.exec(`ALTER TABLE pending_events ADD COLUMN ${column} TEXT`);
@@ -654,7 +655,7 @@ export class MemoryService {
     assertPendingEventStatusTransition(current.status, event.status);
     const stmt = this.db.prepare(`
       UPDATE pending_events
-      SET status = ?, retryCount = ?, decisionReasonCode = ?, decisionReason = ?
+      SET status = ?, retryCount = ?, decisionReasonCode = ?, decisionReason = ?, dependency = ?
       WHERE eventId = ?
     `);
     stmt.run(
@@ -662,6 +663,7 @@ export class MemoryService {
       event.retryCount,
       event.decisionReasonCode ?? null,
       event.decisionReason ?? null,
+      event.dependency ? JSON.stringify(event.dependency) : null,
       event.eventId,
     );
   }
@@ -701,6 +703,7 @@ export class MemoryService {
       retryCount: row.retryCount,
       decisionReasonCode: row.decisionReasonCode || undefined,
       decisionReason: row.decisionReason || undefined,
+      dependency: row.dependency ? JSON.parse(row.dependency) : undefined,
     }));
   }
 
@@ -724,7 +727,7 @@ export class MemoryService {
   hasEquivalentPendingEvent(memoryId: string, content: string): boolean {
     const stmt = this.db.prepare(
       `SELECT candidate FROM pending_events
-       WHERE memoryId = ? AND status IN ('pending', 'processing', 'review')
+       WHERE memoryId = ? AND status IN ('pending', 'processing', 'review', 'waiting_dependency')
        LIMIT 1`,
     );
     const row = stmt.get(memoryId) as { candidate?: string } | undefined;
@@ -741,7 +744,7 @@ export class MemoryService {
   hasPendingEventWithTag(memoryId: string, tag: string): boolean {
     const stmt = this.db.prepare(
       `SELECT candidate FROM pending_events
-       WHERE memoryId = ? AND status IN ('pending', 'processing', 'review')`,
+       WHERE memoryId = ? AND status IN ('pending', 'processing', 'review', 'waiting_dependency')`,
     );
     const rows = stmt.all(memoryId) as Array<{ candidate?: string }>;
 
@@ -780,6 +783,7 @@ export class MemoryService {
       retryCount: row.retryCount,
       decisionReasonCode: row.decisionReasonCode || undefined,
       decisionReason: row.decisionReason || undefined,
+      dependency: row.dependency ? JSON.parse(row.dependency) : undefined,
     };
   }
 
@@ -812,7 +816,16 @@ export class MemoryService {
       retryCount: row.retryCount,
       decisionReasonCode: row.decisionReasonCode || undefined,
       decisionReason: row.decisionReason || undefined,
+      dependency: row.dependency ? JSON.parse(row.dependency) : undefined,
     }));
+  }
+
+  /** Automatically resumes legacy review events after manual review removal. */
+  migrateReviewEventsToPending(): number {
+    const result = this.db
+      .prepare("UPDATE pending_events SET status = 'pending' WHERE status = 'review'")
+      .run();
+    return Number(result.changes);
   }
 
   cancelUnpublishedSourceEvents(sourceId: string): string[] {

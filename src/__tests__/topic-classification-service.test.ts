@@ -93,7 +93,7 @@ describe("TopicClassificationService", () => {
     });
 
     expect(result).toMatchObject({ topic: "reading", source: "rules" });
-    expect(ModelAdapter.generate).not.toHaveBeenCalled();
+    expect(ModelAdapter.generate).toHaveBeenCalled();
   });
 
   it("rejects unknown model topics and falls back to the suggested topic", async () => {

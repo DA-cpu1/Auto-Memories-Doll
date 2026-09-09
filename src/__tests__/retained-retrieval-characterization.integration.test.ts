@@ -7,6 +7,7 @@ import { getNotePath, invalidatePathCache } from "../lib/storage/path-resolver";
 import { KnowledgeModelAdapter } from "../lib/ai/knowledge-model-adapter";
 import { buildMemoryRecord } from "../lib/memory/builder";
 import { MemoryService } from "../server/services/memory-service";
+import { KnowledgeConfigService } from "../server/services/knowledge-config-service";
 import { VectorRetriever } from "../lib/vector/retriever";
 import { searchWithExpansion } from "../lib/vector/query-expansion";
 import { formatMemoryAsMarkdown } from "../lib/storage/markdown-formatter";
@@ -25,6 +26,12 @@ function resetStorage(): void {
 
 beforeEach(() => {
   resetStorage();
+  const service = new KnowledgeConfigService();
+  const config = service.getDefaultAiConfig();
+  service.setAiConfig({
+    ...config,
+    embedding: { ...config.embedding, model: "characterization-embedding", dimensions: 2 },
+  });
 });
 
 afterEach(() => {

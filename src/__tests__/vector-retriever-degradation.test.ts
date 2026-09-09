@@ -112,7 +112,11 @@ describe("VectorRetriever candidate limits", () => {
     try {
       await retriever.searchWithMemories("query", memories, 2, 0);
 
-      expect(vectorIndexMock.search).toHaveBeenCalledWith([1, 0], memories.length);
+      expect(vectorIndexMock.search).toHaveBeenCalledWith(
+        [1, 0],
+        memories.length,
+        expect.any(String),
+      );
     } finally {
       retriever.close();
     }

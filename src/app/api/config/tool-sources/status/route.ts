@@ -22,12 +22,13 @@ export async function GET() {
   }
 
   const memoryService = new MemoryService();
-  let events: { pending: number; review: number; failed: number };
+  let events: { pending: number; review: number; failed: number; waiting_dependency: number };
   try {
     events = {
       pending: memoryService.getEventsByStatus("pending").length,
       review: memoryService.getEventsByStatus("review").length,
       failed: memoryService.getEventsByStatus("failed").length,
+      waiting_dependency: memoryService.getEventsByStatus("waiting_dependency").length,
     };
   } finally {
     memoryService.close();

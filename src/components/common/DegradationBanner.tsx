@@ -12,8 +12,6 @@ export default function DegradationBanner() {
 
   useEffect(() => {
     // 初始从 localStorage 恢复
-    const stored = localStorage.getItem("amd:degraded");
-    if (stored === "true") setCapabilities(["llm", "embedding"]);
 
     let active = true;
 
@@ -57,10 +55,8 @@ export default function DegradationBanner() {
         <div className="flex-1 min-w-0">
           <p className="text-sm font-medium text-warning">部分模型能力处于降级模式</p>
           <p className="text-xs text-warning/80 leading-relaxed">
-            {capabilities.includes("llm") ? "LLM 不可用：依赖模型的候选将进入人工审核。" : ""}
-            {capabilities.includes("embedding")
-              ? " Embedding 不可用：检索自动切换为关键词匹配。"
-              : ""}
+            {capabilities.includes("llm") ? "知识加工等待模型服务恢复。" : ""}
+            {capabilities.includes("embedding") ? " 语义检索不可用，关键词检索继续运行。" : ""}
           </p>
         </div>
       </div>

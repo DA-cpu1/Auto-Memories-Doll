@@ -42,6 +42,7 @@ describe("knowledge agent state transitions", () => {
     expect(canTransitionPendingEventStatus("pending", "processing")).toBe(true);
     expect(canTransitionPendingEventStatus("processing", "review")).toBe(true);
     expect(canTransitionPendingEventStatus("review", "processing")).toBe(true);
+    expect(canTransitionPendingEventStatus("review", "pending")).toBe(true);
     expect(canTransitionPendingEventStatus("failed", "pending")).toBe(true);
     expect(() => assertPendingEventStatusTransition("done", "pending")).toThrow("非法队列状态迁移");
     expect(canTransitionPendingEventStatus("rejected", "pending")).toBe(false);

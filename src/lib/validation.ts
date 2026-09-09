@@ -9,6 +9,7 @@ const modelTierSchema = z.object({
 });
 
 const embeddingSchema = z.object({
+  enabled: z.boolean().default(true),
   model: z.string().min(1, "embedding model 不能为空"),
   dimensions: z.number().int().min(1).max(8192),
   maxConcurrency: z.number().int().min(1).max(50),

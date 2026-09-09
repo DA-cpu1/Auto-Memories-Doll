@@ -1,6 +1,56 @@
 import { z } from "zod";
 import { codexDialogueDiagnosticsSchema } from "../types/codex-dialogue";
 
+export const dependencyActionSchema = z.discriminatedUnion("action", [
+  z.object({ action: z.literal("retry"), eventId: z.string().min(1) }),
+  z.object({ action: z.literal("preview"), includeDisabled: z.boolean().optional() }),
+  z.object({ action: z.enum(["execute", "pause", "report"]), batchId: z.string().min(1) }),
+]);
+
+const recoveryBatchSchema = z.object({
+  id: z.string(),
+  status: z.string(),
+  createdAt: z.string(),
+  items: z.array(
+    z.object({
+      eventId: z.string(),
+      sourceId: z.string().nullable(),
+      reason: z.string(),
+      status: z.string(),
+    }),
+  ),
+});
+
+export const dependencyResponseSchema = z.union([
+  z.object({
+    latestBatch: recoveryBatchSchema.nullable().optional(),
+    vectorStates: z.record(z.string(), z.number().int().nonnegative()).optional(),
+    items: z.array(
+      z.object({
+        eventId: z.string(),
+        memoryId: z.string(),
+        title: z.string(),
+        sourceId: z.string().optional(),
+        dependency: z
+          .object({
+            slot: z.enum(["flagship", "standard", "budget", "embedding"]),
+            stage: z.string(),
+            reason: z.string(),
+            attempts: z.number().int(),
+            lastAttemptAt: z.string(),
+            nextAttemptAt: z.string().optional(),
+            paused: z.boolean(),
+            configFingerprint: z.string(),
+          })
+          .optional(),
+      }),
+    ),
+  }),
+  recoveryBatchSchema,
+  z.object({ success: z.boolean() }),
+  z.object({ error: z.enum(["VALIDATION_FAILED", "INTERNAL_ERROR"]) }),
+]);
+
 export const listenStatusAgentSchema = z.object({
   sources: z.array(
     z
@@ -21,6 +71,11 @@ export type ApiRouteContract = {
 };
 
 export const apiRouteContracts: Record<string, ApiRouteContract> = {
+  "src/app/api/audit/dependencies/route.ts": {
+    requestSchema: "dependencyActionSchema",
+    responseSchema: "dependencyResponseSchema",
+    errorCodes: ["VALIDATION_FAILED", "INTERNAL_ERROR"],
+  },
   "src/app/api/audit/route.ts": {
     requestSchema: "auditActionSchema",
     responseSchema: "auditResponseSchema",

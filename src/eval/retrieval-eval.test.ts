@@ -85,6 +85,7 @@ vi.mock("../lib/vector/generator", () => ({
 }));
 
 import { MemoryService } from "../server/services/memory-service";
+import { KnowledgeConfigService } from "../server/services/knowledge-config-service";
 import { VectorIndex } from "../lib/vector/index";
 import { VectorRetriever } from "../lib/vector/retriever";
 import { EVAL_MEMORIES, EVAL_QUERIES } from "./fixtures";
@@ -183,6 +184,12 @@ describe("检索评测（Recall@k / MRR）", () => {
     dbRef.current = new Database(":memory:");
     // 触发 memories / vector_records 等表的 CREATE TABLE
     new MemoryService().close();
+    const service = new KnowledgeConfigService();
+    const config = service.getDefaultAiConfig();
+    service.setAiConfig({
+      ...config,
+      embedding: { ...config.embedding, model: "eval-bigram", dimensions: EVAL_DIMENSIONS },
+    });
     new VectorIndex().close();
     seedMemories(dbRef.current);
     seedVectors();

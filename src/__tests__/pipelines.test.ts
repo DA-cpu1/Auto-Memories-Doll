@@ -21,12 +21,12 @@ describe("deduplicateMemories", () => {
     expect(ids).toEqual(["b"]);
   });
 
-  it("内容经标准化后相同的标记为重复", () => {
+  it("大小写和标点差异不作为精确重复", () => {
     const ids = deduplicateMemories([
       { id: "a", content: "Hello, World!" },
       { id: "b", content: "hello world" },
     ]);
-    expect(ids).toEqual(["b"]);
+    expect(ids).toEqual([]);
   });
 
   it("不同内容不应标记为重复", () => {
@@ -52,13 +52,13 @@ describe("deduplicateMemories", () => {
 });
 
 describe("detectDuplicates", () => {
-  it("高相似度内容检测为重复", () => {
+  it("高词语重合不作为精确重复", () => {
     // Jaccard ≈ 0.905: 19 公共 / 21 union (20 词 each, 1 diff)
     const result = detectDuplicates("a b c d e f g h i j k l m n o p q r s u", [
       "a b c d e f g h i j k l m n o p q r s t",
     ]);
-    expect(result.isDuplicate).toBe(true);
-    expect(result.similarity).toBeGreaterThan(0.9);
+    expect(result.isDuplicate).toBe(false);
+    expect(result.similarity).toBe(0);
   });
 
   it("完全不同内容不重复", () => {
@@ -71,9 +71,9 @@ describe("detectDuplicates", () => {
     expect(result.isDuplicate).toBe(false);
   });
 
-  it("标准化后比较", () => {
+  it("保留符号后比较", () => {
     const result = detectDuplicates("Hello, World!", ["hello world"]);
-    expect(result.isDuplicate).toBe(true);
+    expect(result.isDuplicate).toBe(false);
   });
 });
 

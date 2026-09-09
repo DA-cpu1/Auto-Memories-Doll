@@ -1,6 +1,7 @@
 import { getAvailableTopics } from "../../config/topics.config";
 import { KnowledgeModelAdapter } from "../../lib/ai/knowledge-model-adapter";
 import { logger } from "../../lib/logger";
+import { parseModelObject } from "../../lib/ai/model-json";
 
 export type TopicClassificationInput = {
   title: string;
@@ -25,10 +26,6 @@ export class TopicClassificationService {
     const fallbackTopic = allowedTopics.has(input.suggestedTopic)
       ? input.suggestedTopic
       : "uncategorized";
-
-    if (KnowledgeModelAdapter.isDegradedMode) {
-      return this.ruleFallback(fallbackTopic, "模型降级，使用规则话题");
-    }
 
     try {
       const response = await KnowledgeModelAdapter.generate(
@@ -98,16 +95,8 @@ ${input.content.slice(0, PROMPT_CONTENT_LIMIT)}
     raw: string,
   ): { topic: string; confidence: number; reason?: string } | null {
     try {
-      const cleaned = raw
-        .trim()
-        .replace(/^```(?:json)?\s*/i, "")
-        .replace(/```$/i, "")
-        .trim();
-      const parsed = JSON.parse(cleaned) as {
-        topic?: unknown;
-        confidence?: unknown;
-        reason?: unknown;
-      };
+      const parsed = parseModelObject(raw);
+      if (!parsed) return null;
       if (typeof parsed.topic !== "string") return null;
       return {
         topic: parsed.topic.trim(),

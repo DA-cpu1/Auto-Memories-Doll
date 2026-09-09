@@ -14,6 +14,7 @@ export type ModelTierConfig = {
 
 /** Embedding 模型配置 — 独立槽位，字段不同于 chat 模型 */
 export type EmbeddingConfig = {
+  enabled?: boolean;
   model: string;
   dimensions: number;
   /** 最大并发调用数 */

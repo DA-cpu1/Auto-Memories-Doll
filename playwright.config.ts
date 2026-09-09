@@ -27,6 +27,7 @@ export default defineConfig({
     timeout: 120_000,
     reuseExistingServer: false,
     env: {
+      NEXT_DIST_DIR: "e2e/.tmp/next-build",
       MEMORY_ROOT: e2eMemoryRoot,
       MODEL_API_KEY: "",
       VECTOR_BACKEND: "js",
