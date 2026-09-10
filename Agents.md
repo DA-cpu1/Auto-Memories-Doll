@@ -687,6 +687,7 @@ export type ConflictRecord = {
 
 | 偏差项 | AGENTS.md 描述 | 实际代码 | 优先级 |
 |--------|---------------|---------|--------|
+| 历史降级被误报为当前故障 | 当前能力应由实时模型状态决定，恢复后可见 | 已修复（LKA-004，2026-09-10）：首页不再合并历史 progress 的降级标记；全局提示读取 /api/health，展示槽位、模型、原因、发生时间与耗时；恢复检查只对失败且退避结束的空闲槽位发短请求。连接测试明确为表单普通模型的基础连通性检查。预期修复版本：LKA-004（本次交付） | ~~P1~~ |
 | Embedding 故障阻塞加工并堆积人工审核 | [LKA-003](docs/specs/003-embedding-degradation/spec.md) 要求 Embedding 可选、能力独立降级、纯服务故障进入持久化等待 | 已修复（LKA-003 首次交付）：独立槽位退避、Embedding 开关、关键词降级、waiting_dependency、20 条恢复批次、加工检查点、版本保护、向量补建及旧队列预览重处理已实现。运行数据未迁移；证据见交付报告 | ~~P1~~ |
 | Codex 采集包含非最终对话事件 | [LKA-002](docs/specs/002-codex-final-dialogue/spec.md) 要求只采集真实用户输入与每轮 AI 最终回答 | 已修复（LKA-002）：独立 schema 白名单、消息身份去重、未完成轮次等待、同字节快照、噪声无操作及来源诊断已接入；439 条单元/集成测试与 5 条 E2E 通过。旧数据不自动清洗，见交付报告 | ~~P1~~ |
 | 队列存储路径 | `src/lib/storage/queue.ts`（第 4.6 节旧版描述） | 已修复：删除 `src/features/audit/queue.ts`（内存 Map），Auditor 统一使用 MemoryService SQLite 队列；dequeueEvent 事务化（悲观锁） | ~~P1~~ |
@@ -974,3 +975,11 @@ Phase 8 — 验证和作品集交付
   - 已知行为：dev server 重启后 processedFiles 内存去重清空，历史文件重新入队，靠 Orchestrator 向量语义去重（cosine ≥ 0.95）兜底
 - 新增测试：`session-parser.test.ts`（parseTrae 中文 Markdown 渲染 + 无 intent 回退文件名）；修正 `config-api-validation.test.ts` providerCatalog 断言（providers.json 已置空，改断言目录结构契约）
 - 当前测试总量：45 个测试文件，443 passed / 0 skipped（共 443 用例）；tsc src 零错误
+
+### LKA-004 模型状态续修（2026-09-10）
+
+- [x] 当前状态与历史任务分离；恢复后移除误报，健康接口不可达时显示状态未知。
+- [x] 健康接口返回脱敏故障详情；日志区分后台加工与恢复检查，记录耗时。
+- [x] 自动恢复只检查失败、退避结束且空闲的槽位，串行短请求最多 128 输出 token，不再轮询全部健康模型。
+- [x] 配置变更后旧请求的失败不污染新配置；连接测试标注范围与保存要求。
+- [x] 使用真实模型的合成短请求与 JSON 整理请求验证当前可用；测试与运行边界见 docs/specs/004-automatic-publishing/model-health-fix.md。

@@ -386,7 +386,9 @@ export default function AiConfigForm({
         <div className="flex items-center justify-between">
           <div>
             <h4 className="text-sm font-semibold text-text-primary">连接测试</h4>
-            <p className="text-xs text-text-secondary mt-0.5">验证 API Key 和模型端点是否可用</p>
+            <p className="text-xs text-text-secondary mt-0.5">
+              测试表单中的普通模型和向量模型连接；后台使用已保存的配置
+            </p>
           </div>
           <button
             type="button"
@@ -417,6 +419,10 @@ export default function AiConfigForm({
         {/* 测试结果 */}
         {testResult && (
           <div className="space-y-2">
+            <p className="text-xs text-text-secondary">
+              连接通过仅代表短请求成功，长文本整理状态请查看页面顶部的模型状态提示。修改配置后需点击“保存
+              AI 配置”。
+            </p>
             {(["llm", "embedding"] as const).map((kind) => {
               const result = testResult[kind];
               const label = kind === "llm" ? "语言模型" : "Embedding 模型";

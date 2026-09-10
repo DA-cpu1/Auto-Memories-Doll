@@ -4,6 +4,8 @@ export type DependencyReason =
   | "NOT_CONFIGURED"
   | "DISABLED"
   | "AUTH_FAILED"
+  | "TIMEOUT"
+  | "RATE_LIMITED"
   | "REQUEST_FAILED"
   | "INVALID_OUTPUT"
   | "OUTPUT_TRUNCATED";

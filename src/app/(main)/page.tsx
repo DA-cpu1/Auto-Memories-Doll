@@ -126,9 +126,6 @@ export default function DashboardPage() {
     (sourceStatus?.watchers?.toolSources?.length ?? 0);
   const recentProgress = sourceStatus?.agent?.progress?.slice(-5).reverse() ?? [];
   const sources = sourceStatus?.agent?.sources ?? [];
-  const degraded = [
-    ...new Set(recentProgress.flatMap((progress) => progress.degradedCapabilities || [])),
-  ];
   const events = queueStatus?.events;
 
   return (
@@ -173,19 +170,6 @@ export default function DashboardPage() {
           ))}
         </div>
       </section>
-
-      {degraded.length > 0 ? (
-        <div
-          role="status"
-          className="mt-4 border-l-2 border-[#A67C00] bg-[#FFF8DF] px-4 py-3 text-sm text-[#6F5400]"
-        >
-          当前降级能力：
-          {degraded.map((item) => (item === "llm" ? "LLM 加工" : "Embedding 检索")).join("、")}
-          {degraded.includes("llm")
-            ? "。知识加工等待模型服务恢复。"
-            : "。语义检索不可用，关键词检索和知识加工继续运行。"}
-        </div>
-      ) : null}
 
       <div className="mt-6 grid grid-cols-1 gap-6 lg:grid-cols-[minmax(0,1.45fr)_minmax(280px,0.75fr)]">
         <section className="rounded-lg border border-[#E0D6C7] bg-[#FFFDF9] p-5 sm:p-6">

@@ -1,6 +1,23 @@
 import { z } from "zod";
 import { codexDialogueDiagnosticsSchema } from "../types/codex-dialogue";
 
+export const healthResponseSchema = z.object({
+  degraded: z.boolean(),
+  degradedCapabilities: z.array(z.enum(["llm", "embedding"])),
+  failures: z.array(
+    z.object({
+      slot: z.enum(["budget", "standard", "flagship", "embedding"]),
+      model: z.string(),
+      reason: z.string(),
+      failedAt: z.string().optional(),
+      retryAt: z.string().optional(),
+      durationMs: z.number().nonnegative().optional(),
+      purpose: z.enum(["processing", "health-check"]).optional(),
+    }),
+  ),
+  timestamp: z.number(),
+});
+
 export const dependencyActionSchema = z.discriminatedUnion("action", [
   z.object({ action: z.literal("retry"), eventId: z.string().min(1) }),
   z.object({ action: z.literal("preview"), includeDisabled: z.boolean().optional() }),
