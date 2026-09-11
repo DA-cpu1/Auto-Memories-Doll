@@ -15,7 +15,7 @@ type WatchStatus = {
     running: number;
     sources: { id: string; name: string; toolType: string; path: string }[];
   };
-  events: { pending: number; review: number; failed: number };
+  events: { pending: number; processing: number; done: number; failed: number };
 };
 
 function StatusBadge({ ok, label }: { ok: boolean; label: string }) {
@@ -144,14 +144,6 @@ export default function ToolSourcesPage() {
               <p className="text-text-secondary">采集队列</p>
               <p className="text-xs text-text-tertiary">
                 待处理 {status?.events.pending ?? 0} · 失败 {status?.events.failed ?? 0}
-                {(status?.events.review ?? 0) > 0 && (
-                  <>
-                    {" · "}
-                    <a href="/audit" className="text-accent hover:underline">
-                      {status?.events.review} 条待人工裁决，去审计页处理 →
-                    </a>
-                  </>
-                )}
               </p>
             </div>
           </div>

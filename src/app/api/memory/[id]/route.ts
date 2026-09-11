@@ -52,7 +52,7 @@ export async function PUT(request: NextRequest, { params }: { params: { id: stri
     return NextResponse.json({
       ...service.getMemory(params.id),
       ...parsed.data,
-      status: "pending_audit",
+      status: "queued",
     });
   } finally {
     service.close();

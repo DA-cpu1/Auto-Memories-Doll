@@ -143,7 +143,7 @@ export default function MemoryLibraryPage() {
               记忆检索库
             </h1>
             <p className="mt-2 max-w-2xl text-sm leading-6 text-text-secondary">
-              搜索、筛选和浏览已经通过审计写入的记忆，点击卡片查看完整内容。
+              搜索、筛选和浏览已自动入库的记忆，点击卡片查看完整内容。
             </p>
           </div>
           <div className="flex shrink-0 flex-wrap gap-2">
@@ -249,7 +249,7 @@ export default function MemoryLibraryPage() {
             description={
               searchMode
                 ? "尝试更换关键词或检查拼写。"
-                : "先配置来源或导入内容，通过审核的知识会出现在这里。"
+                : "先配置来源或导入内容，自动入库的内容会出现在这里。"
             }
           />
         ) : (

@@ -47,7 +47,7 @@ function jsonlToMarkdown(raw: string, fileName: string): string {
  * 1. jsonl 自动转换为 Markdown；其余直接保存
  * 2. 存入 <memory-root>/imports/<ISO时间戳>-<安全文件名>
  * 3. recordWrite 标记本进程写入（防 FileWatcher 循环采集）
- * 4. 立即按 change 事件采集入队（走统一的质量闸门 + 中文抽取拆卡管线）
+ * 4. 立即按 change 事件采集入队（走统一的自动发布与中文抽取拆卡管线）
  */
 export async function POST(request: NextRequest) {
   try {

@@ -97,9 +97,7 @@ export async function POST(request: NextRequest) {
         topicZh: memoryRecord.topicZh,
       },
     );
-    return NextResponse.json(
-      apiResponse({ ...memoryRecord, id: memoryId, status: "pending_audit" }),
-    );
+    return NextResponse.json(apiResponse({ ...memoryRecord, id: memoryId, status: "queued" }));
   } catch (error) {
     const message = error instanceof Error ? error.message : "未知错误";
     logger.api.error("[Memory] 创建失败:", { message });

@@ -42,7 +42,7 @@ export type MemoryWriteRequest = {
 export type MemoryWriteResponse = {
   success: boolean;
   memoryId: string;
-  status: "written" | "queued" | "conflict";
+  status: "written" | "queued";
 };
 
 export type IngestRequest = {
@@ -55,14 +55,6 @@ export type IngestRequest = {
 export type IngestResponse = {
   eventId: string;
   status: "queued" | "processing";
-};
-
-export type AuditRequest = {
-  action: "process" | "resolve" | "list";
-  eventId?: string;
-  conflictId?: string;
-  resolution?: "accept" | "keep" | "manual";
-  manualValue?: string;
 };
 
 export type AuditResponse = {

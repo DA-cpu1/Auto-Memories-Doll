@@ -54,7 +54,13 @@ type SourceStatus = {
 };
 
 type QueueStatus = {
-  events?: { pending?: number; review?: number; failed?: number; waiting_dependency?: number };
+  events?: {
+    pending?: number;
+    processing?: number;
+    done?: number;
+    failed?: number;
+    waiting_dependency?: number;
+  };
 };
 
 const STAGE_LABELS: Record<string, string> = {
@@ -67,7 +73,7 @@ const STAGE_LABELS: Record<string, string> = {
   publishing: "发布中",
   indexed: "已索引",
   done: "已完成",
-  review: "待审核",
+  review: "等待自动恢复",
   rejected: "已拒绝",
   failed_retryable: "等待重试",
   waiting_dependency: "等待模型服务",
@@ -143,6 +149,9 @@ export default function DashboardPage() {
         </button>
       </header>
 
+      <p className="mb-4 text-sm text-[#6F604B]">
+        有效消息自动入库，无需人工审核。排队任务会自动处理；失败表示解析、模型调用或文件写入出错，并非内容被筛选。
+      </p>
       <section aria-labelledby="status-heading">
         <h2 id="status-heading" className="sr-only">
           处理状态
@@ -155,13 +164,15 @@ export default function DashboardPage() {
               value: activeWatcherCount,
               tone: activeWatcherCount > 0 ? "text-[#567228]" : "text-[#8B7355]",
             },
-            { label: "待处理", value: events?.pending ?? 0, tone: "text-[#A67C00]" },
+            { label: "正在自动处理", value: events?.processing ?? 0, tone: "text-[#A67C00]" },
+            { label: "已完成任务", value: events?.done ?? 0, tone: "text-[#567228]" },
+            { label: "排队等待入库", value: events?.pending ?? 0, tone: "text-[#A67C00]" },
             {
               label: "等待模型服务",
               value: events?.waiting_dependency ?? 0,
               tone: "text-[#A67C00]",
             },
-            { label: "处理失败", value: events?.failed ?? 0, tone: "text-[#A14C37]" },
+            { label: "处理失败（非审核）", value: events?.failed ?? 0, tone: "text-[#A14C37]" },
           ].map((item) => (
             <div key={item.label} className="rounded-lg border border-[#E0D6C7] bg-[#FFFDF9] p-4">
               <p className="text-xs font-medium text-[#8B7355]">{item.label}</p>
@@ -346,7 +357,6 @@ export default function DashboardPage() {
       <nav aria-label="快捷入口" className="mt-6 grid gap-3 sm:grid-cols-3">
         {[
           { href: "/settings/tools", title: "来源设置", detail: "配置目录与工具会话来源" },
-          { href: "/audit", title: "审核队列", detail: `${events?.review ?? 0} 条候选等待裁决` },
           { href: "/memory/map", title: "知识图谱", detail: "浏览 Wikilink 关联" },
         ].map((item) => (
           <Link
