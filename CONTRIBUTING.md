@@ -1,13 +1,13 @@
 # 贡献指南
 
-开发前先阅读 `Agents.md` 与 `docs/specs/001-local-knowledge-agent/`。项目范围是本地知识整理 Agent，不接受重新引入通用聊天、画像、人格 Prompt、聊天型 MCP/Skills 或浏览器历史采集的改动。
+开发前先阅读 `Agents.md`、`docs/specs/004-automatic-publishing/delivery.md` 与 `docs/specs/001-local-knowledge-agent/`。当前采用 LKA-004 自动发布策略，替代旧规范中的质量筛选和人工审核要求。项目范围是本地知识整理 Agent，不接受重新引入通用聊天、画像、人格 Prompt、聊天型 MCP/Skills 或浏览器历史采集的改动。
 
 ## 架构约束
 
 1. `src/features/` 和 `src/lib/` 不依赖 React、Next.js 路由或 CSS。
 2. 采集入口统一产生 `SourceRevisionEvent`，处理进度统一写 `AgentProgressEvent`。
-3. 候选先进入 SQLite `pending_events`，接受后才能发布 Markdown。
-4. 模型调用只经过 `KnowledgeModelAdapter`；降级必须可见且 fail-closed。
+3. 候选先进入 SQLite `pending_events`，格式有效的消息自动发布；保持来源幂等、同一记忆 ID 串行处理和版本快照。
+4. 模型调用只经过 `KnowledgeModelAdapter`；整理失败保留完整原文，Embedding 故障降级为关键词检索，降级必须可见。格式或落盘失败保留真实失败状态。
 5. 新 API 必须登记到 `src/config/api-route-contracts.ts` 并在入口做 Zod 校验。
 6. 文档、测试和实现必须在同一变更中更新。
 

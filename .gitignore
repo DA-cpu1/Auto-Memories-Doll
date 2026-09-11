@@ -28,6 +28,8 @@ docs/*
 !docs/.gitkeep
 !docs/specs/
 !docs/specs/**
+# Personal resume exports and interview study materials
+/output/pdf/resume/
 notes/
 docs-zh/.obsidian/workspace.json
 *.private.md
@@ -96,3 +98,7 @@ e2e/.tmp/
 
 # 检索评测报告（每次 npm run eval 重新生成）
 evals/reports/
+
+# Local browser verification artifacts
+.playwright-cli/
+output/playwright/

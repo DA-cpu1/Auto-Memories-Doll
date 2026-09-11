@@ -32,10 +32,12 @@ const modelServer = createServer(async (request, response) => {
   for await (const chunk of request) chunks.push(chunk);
   const body = JSON.parse(Buffer.concat(chunks).toString());
   const prompt = body.messages?.[0]?.content ?? "";
-  const content = prompt.includes("质量闸门")
-    ? JSON.stringify({ score: 5, kind: "fact", reason: "证据不足，需要人工复核" })
-    : prompt.includes("话题分类器")
-      ? JSON.stringify({ topic: "learning", confidence: 1 })
+  const sourceText = prompt.split("原始内容：\n")[1]?.split("\n只回复 JSON")[0] ?? "测试响应";
+  const title = prompt.match(/标题：([^\n]+)/)?.[1] ?? "测试笔记";
+  const content = prompt.includes("话题分类器")
+    ? JSON.stringify({ topic: "learning", confidence: 1 })
+    : prompt.includes("记忆库的编辑")
+      ? JSON.stringify({ memories: [{ title, summary: sourceText.slice(0,80), content: sourceText, tags: ["测试"] }] })
       : "{}";
   response.end(
     JSON.stringify({

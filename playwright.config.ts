@@ -8,7 +8,7 @@ const e2eMemoryRoot = join(process.cwd(), "e2e", ".tmp", "memory-root");
 export default defineConfig({
   testDir: "./e2e",
   globalTeardown: "./e2e/global-teardown.ts",
-  timeout: 30_000,
+  timeout: 120_000,
   expect: {
     timeout: 10_000,
   },

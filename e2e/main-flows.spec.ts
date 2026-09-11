@@ -21,8 +21,15 @@ function collectBrowserDiagnostics(page: Page) {
 }
 
 async function replayQueue(request: APIRequestContext): Promise<void> {
-  const response = await request.post("/api/audit", { data: { action: "replay" } });
-  expect(response.ok(), await response.text()).toBe(true);
+  await expect
+    .poll(
+      async () => {
+        const payload = await (await request.get("/api/config/tool-sources/status")).json();
+        return payload.events.pending + payload.events.processing;
+      },
+      { timeout: 90000 },
+    )
+    .toBe(0);
 }
 
 test.describe.configure({ mode: "serial" });
@@ -35,84 +42,7 @@ test("设置页使用已保存的脱敏凭据完成连接测试", async ({ page 
   await expect(page.getByRole("button", { name: "测试连接", exact: true })).toBeEnabled();
 });
 
-test("批量确认按钮位于长审核列表前，预览刷新后保留且可执行", async ({ page }, testInfo) => {
-  let previewed = false;
-  let executions = 0;
-  const batch = {
-    id: "test-visible-recovery",
-    status: "preview",
-    createdAt: "2026-09-05T00:00:00.000Z",
-    items: Array.from({ length: 326 }, (_, index) => ({
-      eventId: `review-${index}`,
-      sourceId: "fixture-source",
-      reason: index < 325 ? "ELIGIBLE" : "NOT_VECTOR_ONLY_REVIEW",
-      status: index < 325 ? "pending" : "skipped",
-    })),
-  };
-  await page.route("**/api/audit/dependencies", async (route) => {
-    if (route.request().method() === "GET") {
-      await route.fulfill({
-        json: { items: [], vectorStates: {}, latestBatch: previewed ? batch : null },
-      });
-      return;
-    }
-    const command = route.request().postDataJSON();
-    if (command.action === "preview") previewed = true;
-    if (command.action === "execute") {
-      expect(command.batchId).toBe(batch.id);
-      executions++;
-      batch.status = "done";
-      batch.items.forEach((item) => {
-        if (item.status === "pending") item.status = "queued";
-      });
-    }
-    await route.fulfill({ json: batch });
-  });
-  await page.route("**/api/audit/review-events", (route) =>
-    route.fulfill({
-      json: {
-        items: Array.from({ length: executions ? 1 : 326 }, (_, index) => ({
-          eventId: `review-${index}`,
-          memoryId: `memory-${index}`,
-          sourceType: "ingest",
-          createdAt: "2026-09-05",
-          retryCount: 0,
-          reasonCode: "VECTOR_RECALL_UNAVAILABLE",
-          reason: "旧向量故障",
-          candidate: {
-            title: `测试候选 ${index + 1}`,
-            summary: "候选摘要",
-            content: "候选正文",
-            tags: [],
-            topic: "learning",
-            kind: "fact",
-            source: "fixture-source",
-          },
-        })),
-      },
-    }),
-  );
-  await page.goto("/audit");
-  const preview = page.getByRole("button", { name: "预览旧服务故障候选" });
-  await expect(preview).toBeInViewport();
-  await preview.click();
-  const confirm = page.getByRole("button", { name: "确认重新处理 325 条" });
-  await expect(confirm).toBeInViewport();
-  await page.reload();
-  await expect(confirm).toBeInViewport();
-  expect(executions).toBe(0);
-  await page.screenshot({ path: testInfo.outputPath("recovery-confirm-desktop.png") });
-  await page.setViewportSize({ width: 390, height: 844 });
-  await expect(confirm).toBeInViewport();
-  await page.screenshot({ path: testInfo.outputPath("recovery-confirm-mobile.png") });
-  await confirm.click();
-  await expect(page.getByRole("status")).toContainText("批次提交完成");
-  await expect(page.getByRole("heading", { name: /^测试候选 / })).toHaveCount(1);
-  expect(executions).toBe(1);
-  await expect(confirm).toHaveCount(0);
-});
-
-test("来源配置到审核发布、检索、主题资料和来源追溯形成完整闭环", async ({ page, request }) => {
+test("来源配置到自动发布、检索、主题资料和来源追溯形成完整闭环", async ({ page, request }) => {
   const diagnostics = collectBrowserDiagnostics(page);
 
   await page.goto("/settings/tools");
@@ -138,22 +68,7 @@ test("来源配置到审核发布、检索、主题资料和来源追溯形成�
   await page.getByRole("button", { name: "扫描所有来源" }).click();
   await expect(page.getByRole("status")).toContainText("1 个工具会话文件已检查");
 
-  await expect
-    .poll(async () => {
-      await replayQueue(request);
-      const response = await request.get("/api/audit/review-events");
-      return (await response.json()).items.length;
-    })
-    .toBe(1);
-
-  await page.goto("/audit");
-  await expect(page.getByRole("heading", { name: "审核工作台" })).toBeVisible();
-  await expect(page.getByRole("heading", { name: SOURCE_TITLE })).toBeVisible();
-  await expect(page.getByText("证据不足，需要人工复核", { exact: false })).toBeVisible();
-  await expect(page.getByText(SOURCE_PATH, { exact: false })).toBeVisible();
-  await page.getByRole("button", { name: "接受候选" }).click();
-  await expect(page.getByText("没有等待裁决的候选。")).toBeVisible();
-
+  await replayQueue(request);
   await page.goto("/memory");
   await page.getByPlaceholder("搜索标题、摘要、正文或标签...").fill("KnowledgeAgent 循环");
   await page.getByRole("button", { name: "搜索记忆" }).click();
@@ -187,8 +102,7 @@ test("未变化来源重复扫描不产生副本", async ({ page, request }) => 
     afterPayload.data.items.filter((item: { title: string }) => item.title === SOURCE_TITLE),
   ).toHaveLength(1);
 
-  const reviews = await request.get("/api/audit/review-events");
-  expect((await reviews.json()).items).toHaveLength(0);
+  expect((await request.get("/api/audit/review-events")).status()).toBe(404);
 
   await page.goto("/memory");
   await expect(page.getByRole("link", { name: `查看记忆：${SOURCE_TITLE}` })).toHaveCount(1);
@@ -214,7 +128,17 @@ test("手机端主页面无横向溢出且可访问已发布知识", async ({ pa
 });
 
 test("已删除产品入口不可访问且 listen 非法请求保持结构化错误", async ({ request }) => {
-  for (const path of ["/chat", "/settings/profile", "/api/chat", "/api/profile"]) {
+  for (const path of [
+    "/chat",
+    "/settings/profile",
+    "/api/chat",
+    "/api/profile",
+    "/audit",
+    "/api/audit",
+    "/api/audit/conflicts",
+    "/api/audit/review-events",
+    "/api/audit/dependencies",
+  ]) {
     const response = await request.get(path);
     expect(response.status(), path).toBe(404);
   }
@@ -230,7 +154,7 @@ test("已删除产品入口不可访问且 listen 非法请求保持结构化错
   });
 });
 
-test("Codex 来源显示等待与未知格式，最终回答到达后可审核发布", async ({
+test("Codex 来源显示等待与未知格式，最终回答到达后自动发布", async ({
   page,
   request,
 }, testInfo) => {
@@ -264,21 +188,15 @@ test("Codex 来源显示等待与未知格式，最终回答到达后可审核�
     ),
   ).toBe(true);
   await page.screenshot({ path: testInfo.outputPath("codex-mobile.png"), fullPage: true });
-  const before = await request.get("/api/audit/review-events");
-  expect((await before.json()).items).toHaveLength(0);
   writeFileSync(file, prefix + jsonl(final("只归档真实问题与最终回答。")));
   await request.post("/api/listen/scan");
   await replayQueue(request);
-  await page.goto("/audit");
-  await expect(page.getByRole("heading", { name: "Codex 最终对话验收" })).toBeVisible();
-  await page.getByRole("button", { name: "接受候选" }).click();
-  await expect(page.getByText("没有等待裁决的候选。")).toBeVisible();
   await page.goto("/memory");
   await expect(page.getByRole("link", { name: "查看记忆：Codex 最终对话验收" })).toBeVisible();
   expect(diagnostics).toEqual([]);
 });
 
-test("模型故障显示独立等待列表，Embedding 关闭配置保留", async ({ page, request }, testInfo) => {
+test("模型故障仍自动保存原文，Embedding 关闭配置保留", async ({ page, request }, testInfo) => {
   const config = await (await request.get("/api/config/ai")).json();
   expect(config.embedding.enabled).toBe(false);
   const saved = await request.post("/api/config/ai", {
@@ -301,13 +219,13 @@ test("模型故障显示独立等待列表，Embedding 关闭配置保留", asyn
   });
   expect(listened.ok()).toBe(true);
   await replayQueue(request);
-  const waiting = await (await request.get("/api/audit/dependencies")).json();
-  expect(waiting.items).toHaveLength(1);
-  expect(waiting.items[0].dependency.paused).toBe(true);
-  expect((await (await request.get("/api/audit/review-events")).json()).items).toHaveLength(0);
-  await page.goto("/audit");
-  await expect(page.getByRole("heading", { name: "等待模型服务 (1)" })).toBeVisible();
-  await expect(page.getByText("自动重试已暂停", { exact: false })).toBeVisible();
+  const waiting = await (await request.get("/api/config/tool-sources/status")).json();
+  expect(waiting.events.waiting_dependency).toBe(0);
+  await page.goto("/memory");
+  await expect(page.getByRole("link", { name: "查看记忆：等待服务专用候选" })).toBeVisible();
+  await page.goto("/");
+  await expect(page.getByText("无需人工审核", { exact: false })).toBeVisible();
+  await expect(page.getByText("等待模型服务", { exact: true }).first()).toBeVisible();
   await page.screenshot({ path: testInfo.outputPath("ka003-waiting-desktop.png"), fullPage: true });
   await page.setViewportSize({ width: 390, height: 844 });
   expect(
