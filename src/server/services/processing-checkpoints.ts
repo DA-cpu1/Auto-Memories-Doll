@@ -23,7 +23,7 @@ export class ProcessingCheckpoints {
     return createHash("sha256")
       .update(
         JSON.stringify([
-          "ka-003-final-json-v2",
+          "auto-publish-source-fallback-v2",
           candidate,
           KnowledgeModelAdapter.configurationFingerprint(
             stage === "topic" ? "standard" : "flagship",

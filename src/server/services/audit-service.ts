@@ -1,10 +1,6 @@
-import { MemoryRecord, ConflictRecord } from "../../types/memory";
-import { generateId } from "../../lib/utils/id";
-import { getCurrentTime } from "../../lib/utils/date";
+import { ConflictRecord } from "../../types/memory";
 import { getDatabase } from "../../lib/storage/database";
 import Database from "better-sqlite3";
-
-export type ConflictLevel = "auto_merge" | "manual_decision" | "unmergeable";
 
 export class AuditService {
   private db: Database.Database;
@@ -29,116 +25,6 @@ export class AuditService {
         resolvedAt TEXT
       )
     `);
-  }
-
-  assessConflict(
-    existing: MemoryRecord,
-    candidate: MemoryRecord,
-    changedFields: string[],
-  ): ConflictLevel {
-    for (const field of changedFields) {
-      if (field === "version") continue;
-
-      const existingValue = existing[field as keyof MemoryRecord];
-      const candidateValue = candidate[field as keyof MemoryRecord];
-
-      if (JSON.stringify(existingValue) !== JSON.stringify(candidateValue)) {
-        if (field === "tags") {
-          const existingTags = new Set(existing.tags);
-          const candidateTags = new Set(candidate.tags);
-          const newTags = Array.from(candidateTags).filter((t) => !existingTags.has(t));
-          if (newTags.length > 0) {
-            return "auto_merge";
-          }
-        }
-
-        if (field === "graphLinks") {
-          return "auto_merge";
-        }
-
-        return "manual_decision";
-      }
-    }
-
-    return "auto_merge";
-  }
-
-  createConflict(
-    memoryId: string,
-    eventId: string,
-    field: string,
-    existingValue: any,
-    candidateValue: any,
-  ): ConflictRecord {
-    const conflict: ConflictRecord = {
-      conflictId: generateId(),
-      memoryId,
-      eventId,
-      field,
-      existingValue: JSON.stringify(existingValue),
-      candidateValue: JSON.stringify(candidateValue),
-      status: "pending",
-      createdAt: getCurrentTime(),
-    };
-
-    const stmt = this.db.prepare(`
-      INSERT INTO conflict_records (
-        conflictId, memoryId, eventId, field, existingValue, candidateValue, status, createdAt
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-    `);
-    stmt.run(
-      conflict.conflictId,
-      conflict.memoryId,
-      conflict.eventId,
-      conflict.field,
-      conflict.existingValue,
-      conflict.candidateValue,
-      conflict.status,
-      conflict.createdAt,
-    );
-
-    return conflict;
-  }
-
-  markConflictResolved(
-    conflictId: string,
-    resolution: "accept" | "keep" | "manual",
-    manualValue?: string,
-  ): void {
-    const statusMap = {
-      accept: "resolved_accept",
-      keep: "resolved_keep",
-      manual: "resolved_manual",
-    };
-
-    const stmt = this.db.prepare(`
-      UPDATE conflict_records SET status = ?, resolution = ?, resolvedAt = ?
-      WHERE conflictId = ? AND status = 'pending'
-    `);
-    const result = stmt.run(statusMap[resolution], manualValue ?? "", getCurrentTime(), conflictId);
-    if (result.changes === 0) {
-      throw new Error(`冲突不存在或已解决: ${conflictId}`);
-    }
-  }
-
-  getConflict(conflictId: string): ConflictRecord | null {
-    const row = this.db
-      .prepare("SELECT * FROM conflict_records WHERE conflictId = ?")
-      .get(conflictId) as any;
-    if (!row) return null;
-
-    return {
-      conflictId: row.conflictId,
-      memoryId: row.memoryId,
-      eventId: row.eventId,
-      field: row.field,
-      existingValue: row.existingValue,
-      candidateValue: row.candidateValue,
-      status: row.status as ConflictRecord["status"],
-      resolution: row.resolution,
-      createdAt: row.createdAt,
-      resolvedAt: row.resolvedAt,
-    };
   }
 
   listConflicts(status?: string): ConflictRecord[] {

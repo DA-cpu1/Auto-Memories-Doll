@@ -1,3 +1,4 @@
+import { MemoryExtractionService } from "../server/services/memory-extraction-service";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { mkdirSync, rmSync } from "node:fs";
 import { closeDatabase, getDatabase } from "../lib/storage/database";
@@ -9,7 +10,6 @@ import { createSourceRevisionEvent } from "../lib/source/source-revision";
 import { KnowledgeAgent } from "../server/services/knowledge-agent";
 import { KnowledgeModelAdapter } from "../lib/ai/knowledge-model-adapter";
 import { MemoryService } from "../server/services/memory-service";
-import { QualityFilterService } from "../server/services/quality-filter-service";
 import { SourceRegistry } from "../server/services/source-registry";
 import { buildMemoryRecord } from "../lib/memory/builder";
 
@@ -124,10 +124,6 @@ describe.sequential("Phase 3 normalization and provenance", () => {
   });
 
   it("links an accepted knowledge unit to its exact source version", async () => {
-    vi.spyOn(QualityFilterService.prototype, "filter").mockResolvedValue({
-      verdict: "review",
-      reason: "证据不足",
-    });
     vi.spyOn(KnowledgeModelAdapter, "isDegradedMode", "get").mockReturnValue(true);
     const sourcePath = `${memoryRoot}/linked.md`;
     const content = "# Linked\n\nThis accepted unit retains its exact local source revision.";
@@ -139,14 +135,15 @@ describe.sequential("Phase 3 normalization and provenance", () => {
     });
     const agent = new KnowledgeAgent();
     const staged = await agent.ingestSourceRevision({ event, content });
+    vi.spyOn(MemoryExtractionService.prototype, "extract").mockImplementation(async (candidate) => [
+      {
+        title: candidate.title,
+        summary: candidate.summary,
+        content: candidate.content,
+        tags: candidate.tags,
+      },
+    ]);
     await agent.processQueue();
-    const review = agent.getReviewEvents()[0];
-    expect(
-      getDatabase()
-        .prepare("SELECT COUNT(*) AS count FROM source_memory_links WHERE memoryId = ?")
-        .get(staged.memoryIds[0]),
-    ).toEqual({ count: 0 });
-    await agent.resolveReviewEvent(review.eventId, "accept");
 
     expect(
       getDatabase()

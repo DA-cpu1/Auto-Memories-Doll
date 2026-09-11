@@ -68,7 +68,7 @@ export class MemoryCardHygieneService {
       titleZh: cleanedTitle || "旧记忆卡片优化",
       summary: cleanedSummary || "已清理旧记忆卡片的乱码、格式和表达问题。",
       summaryZh: cleanedSummary || "已清理旧记忆卡片的乱码、格式和表达问题。",
-      content: cleanedContent || "旧记忆卡片内容存在严重格式问题，已转为待人工复核的清理候选。",
+      content: cleanedContent || "旧记忆卡片内容存在格式问题，已保留清理记录。",
       tags,
       tagsZh: tags,
     };

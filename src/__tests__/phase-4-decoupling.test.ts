@@ -40,7 +40,6 @@ describe("LKA-001 Phase 4 dependency boundaries", () => {
       "src/server/services/knowledge-agent.ts",
       "src/server/services/memory-extraction-service.ts",
       "src/server/services/orchestrator.ts",
-      "src/server/services/quality-filter-service.ts",
       "src/server/services/topic-classification-service.ts",
     ];
 

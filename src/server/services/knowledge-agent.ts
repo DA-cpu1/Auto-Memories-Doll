@@ -8,7 +8,6 @@ import { ConversationProcessor, KnowledgeCard } from "../../features/ingest/conv
 import { buildKnowledgeLogFromText } from "../../features/ingest/knowledge-log";
 import { assertAgentStageTransition } from "../../features/agent/state-machine";
 import { buildMemoryRecord } from "../../lib/memory/builder";
-import { validateMemoryRecord } from "../../lib/memory/validator";
 import { getDatabase } from "../../lib/storage/database";
 import { parseMemoryFromText } from "../../lib/storage/markdown-parser";
 import { createSourceRevision, parseSourceRevisionEvent } from "../../lib/source/source-revision";
@@ -24,7 +23,6 @@ import type {
   MemoryEvidence,
   MemoryKind,
   MemoryRecord,
-  PendingEvent,
 } from "../../types/memory";
 import type { SourceDocument, SourceRevisionEvent } from "../../types/source";
 import type { NormalizationReport, SourceChunk } from "../../types/normalization";
@@ -33,7 +31,6 @@ import { Orchestrator } from "./orchestrator";
 import { SourceRegistry } from "./source-registry";
 import { dependencyConfig } from "../../config/dependency.config";
 import { VectorBackfill } from "./vector-backfill";
-import { DependencyRecovery } from "./dependency-recovery";
 
 export type SourceRevisionInput = {
   event: SourceRevisionEvent;
@@ -293,7 +290,7 @@ export class KnowledgeAgent {
   }
 
   private async processQueueBatch(): Promise<void> {
-    new DependencyRecovery().resumeBatches();
+    this.memoryService.migrateReviewEventsToPending();
     await new VectorBackfill().run();
     this.resumeDependencies();
     const pendingEvents = this.memoryService.getPendingEvents({
@@ -330,22 +327,6 @@ export class KnowledgeAgent {
             this.transition(sourceEvent, "processing", "done", startedAt, event.memoryId);
             break;
           }
-          const waitingConflict = this.db
-            .prepare(
-              "SELECT 1 FROM conflict_records WHERE eventId = ? AND status = 'pending' LIMIT 1",
-            )
-            .get(event.eventId);
-          if (waitingConflict) {
-            this.transition(
-              sourceEvent,
-              "processing",
-              "review",
-              startedAt,
-              event.memoryId,
-              "waiting",
-            );
-            break;
-          }
           this.linkPublishedMemory(sourceEvent, event.memoryId);
           let current: AgentStage = "processing";
           current = this.transition(sourceEvent, current, "accepted", startedAt, event.memoryId);
@@ -365,20 +346,6 @@ export class KnowledgeAgent {
             progressFailure(
               persisted.decisionReasonCode ?? "MODEL_UNAVAILABLE",
               persisted.decisionReason ?? "等待模型服务",
-            ),
-          );
-          break;
-        case "review":
-          this.transition(
-            sourceEvent,
-            "processing",
-            "review",
-            startedAt,
-            event.memoryId,
-            "waiting",
-            progressFailure(
-              persisted.decisionReasonCode ?? "MANUAL_REVIEW",
-              persisted.decisionReason ?? "质量闸门要求人工确认",
             ),
           );
           break;
@@ -461,39 +428,6 @@ export class KnowledgeAgent {
     return this.memoryService.getPendingEvents();
   }
 
-  getReviewEvents(limit?: number): PendingEvent[] {
-    return this.memoryService.getEventsByStatus("review", limit);
-  }
-
-  updateReviewCandidate(
-    eventId: string,
-    updates: Pick<MemoryRecord, "title" | "summary" | "content" | "tags" | "topic">,
-  ): PendingEvent {
-    const event = this.memoryService.getEvent(eventId);
-    if (!event || event.status !== "review") {
-      throw new Error("待审核事件不存在或状态已变化");
-    }
-
-    const candidate = JSON.parse(event.candidate) as MemoryRecord;
-    const nextCandidate: MemoryRecord = {
-      ...candidate,
-      ...updates,
-      title: updates.title.trim(),
-      summary: updates.summary.trim(),
-      content: updates.content.trim(),
-      tags: updates.tags.map((tag) => tag.trim()).filter(Boolean),
-      topic: updates.topic.trim(),
-      updatedAt: new Date().toISOString(),
-    };
-    if (!validateMemoryRecord(nextCandidate)) {
-      throw new Error("编辑后的候选不符合记忆结构约束");
-    }
-    this.memoryService.updateEventCandidate(eventId, nextCandidate, [
-      ...new Set([...event.changedFields, "title", "summary", "content", "tags", "topic"]),
-    ]);
-    return { ...event, candidate: JSON.stringify(nextCandidate) };
-  }
-
   async processIngest(
     source: string,
     sourceType: "chat" | "ingest" | "manual" | "mcp" | "skill",
@@ -532,46 +466,6 @@ export class KnowledgeAgent {
     const orchestrator = new Orchestrator();
     try {
       return await orchestrator.rebuildCollectedMemories();
-    } finally {
-      orchestrator.close();
-    }
-  }
-
-  async resolveReviewEvent(eventId: string, action: "accept" | "reject"): Promise<PendingEvent> {
-    const before = this.memoryService.getEvent(eventId);
-    const sourceEvent = before ? this.sourceEventForPending(before) : null;
-    const orchestrator = new Orchestrator();
-    try {
-      const resolved = await orchestrator.resolveReviewEvent(eventId, action);
-      if (action === "accept" && sourceEvent)
-        this.linkPublishedMemory(sourceEvent, resolved.memoryId);
-      if (sourceEvent && this.latestProgress(sourceEvent.eventId)?.stage === "review") {
-        this.recordReviewResolution(sourceEvent, resolved.memoryId, action);
-      }
-      return resolved;
-    } finally {
-      orchestrator.close();
-    }
-  }
-
-  async resolveConflict(
-    conflictId: string,
-    resolution: "accept" | "keep" | "manual",
-    manualValue?: string,
-  ): Promise<MemoryRecord> {
-    const conflict = this.db
-      .prepare("SELECT eventId FROM conflict_records WHERE conflictId = ?")
-      .get(conflictId) as { eventId: string } | undefined;
-    const pending = conflict ? this.memoryService.getEvent(conflict.eventId) : null;
-    const sourceEvent = pending ? this.sourceEventForPending(pending) : null;
-    const orchestrator = new Orchestrator();
-    try {
-      const memory = await orchestrator.resolveConflict(conflictId, resolution, manualValue);
-      if (sourceEvent && resolution !== "keep") this.linkPublishedMemory(sourceEvent, memory.id);
-      if (sourceEvent && this.latestProgress(sourceEvent.eventId)?.stage === "review") {
-        this.recordReviewResolution(sourceEvent, memory.id, "accept");
-      }
-      return memory;
     } finally {
       orchestrator.close();
     }
@@ -673,23 +567,6 @@ export class KnowledgeAgent {
             }
           : undefined,
     };
-  }
-
-  private recordReviewResolution(
-    sourceEvent: SourceRevisionEvent,
-    memoryId: string,
-    action: "accept" | "reject",
-  ): void {
-    const startedAt = Date.now();
-    if (action === "reject") {
-      this.transition(sourceEvent, "review", "rejected", startedAt, memoryId);
-      return;
-    }
-    let current: AgentStage = "review";
-    current = this.transition(sourceEvent, current, "accepted", startedAt, memoryId);
-    current = this.transition(sourceEvent, current, "publishing", startedAt, memoryId);
-    current = this.transition(sourceEvent, current, "indexed", startedAt, memoryId);
-    this.transition(sourceEvent, current, "done", startedAt, memoryId);
   }
 
   private sourceEventForPending(
@@ -856,7 +733,7 @@ export class KnowledgeAgent {
     chunks: SourceChunk[] = [],
   ): MemoryRecord[] {
     const locator = sourceLocator ?? event.sourcePath;
-    if (content.length < 10) return [];
+    if (!content.trim()) return [];
     if (content.startsWith("---")) {
       const record = parseMemoryFromText(content);
       if (record) {

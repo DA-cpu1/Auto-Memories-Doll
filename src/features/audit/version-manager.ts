@@ -1,3 +1,7 @@
+import { mkdirSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
+import { getArchivePath } from "../../lib/storage/path-resolver";
+import { formatMemoryAsMarkdown } from "../../lib/storage/markdown-formatter";
 import { MemoryRecord } from "../../types/memory";
 import { getDatabase } from "../../lib/storage/database";
 import Database from "better-sqlite3";
@@ -10,6 +14,7 @@ export type MemorySnapshot = {
   version: number;
   data: MemoryRecord;
   createdAt: string;
+  snapshotPath?: string;
 };
 
 export class VersionManager {
@@ -30,6 +35,11 @@ export class VersionManager {
         createdAt TEXT
       )
     `);
+    const columns = this.db.prepare("PRAGMA table_info(memory_snapshots)").all() as Array<{
+      name: string;
+    }>;
+    if (!columns.some((column) => column.name === "snapshotPath"))
+      this.db.exec("ALTER TABLE memory_snapshots ADD COLUMN snapshotPath TEXT");
   }
 
   createSnapshot(memory: MemoryRecord, version: number): MemorySnapshot {
@@ -41,9 +51,17 @@ export class VersionManager {
       createdAt: getCurrentTime(),
     };
 
+    const directory = join(getArchivePath(), "versions");
+    mkdirSync(directory, { recursive: true });
+    const snapshotPath = join(
+      directory,
+      `${snapshot.createdAt.replace(/[:.]/g, "-")}-${snapshot.snapshotId}.md`,
+    );
+    writeFileSync(snapshotPath, formatMemoryAsMarkdown(memory), { encoding: "utf8", flag: "wx" });
+    snapshot.snapshotPath = snapshotPath;
     const stmt = this.db.prepare(`
-      INSERT INTO memory_snapshots (snapshotId, memoryId, version, data, createdAt)
-      VALUES (?, ?, ?, ?, ?)
+      INSERT INTO memory_snapshots (snapshotId, memoryId, version, data, createdAt, snapshotPath)
+      VALUES (?, ?, ?, ?, ?, ?)
     `);
     stmt.run(
       snapshot.snapshotId,
@@ -51,6 +69,7 @@ export class VersionManager {
       snapshot.version,
       JSON.stringify(snapshot.data),
       snapshot.createdAt,
+      snapshotPath,
     );
 
     return snapshot;
@@ -69,6 +88,7 @@ export class VersionManager {
       version: row.version,
       data: JSON.parse(row.data),
       createdAt: row.createdAt,
+      snapshotPath: row.snapshotPath || undefined,
     };
   }
 
@@ -83,6 +103,7 @@ export class VersionManager {
       version: row.version,
       data: JSON.parse(row.data),
       createdAt: row.createdAt,
+      snapshotPath: row.snapshotPath || undefined,
     }));
   }
 

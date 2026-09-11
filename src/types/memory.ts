@@ -1,4 +1,4 @@
-/** 记忆类型：事实 / 推断 / 假设 / 待验证洞察（非 fact 必须人工裁决后才可入库） */
+/** 记忆类型：事实 / 推断 / 假设 / 待验证洞察（不作为入库门槛） */
 export type MemoryKind = "fact" | "inference" | "hypothesis" | "insight";
 
 /** 来源证据：原文片段 + 可选位置（文件路径 / URL），事实类入库的证据约束 */
@@ -24,9 +24,9 @@ export type MemoryRecord = {
   version: number;
   source: string;
   sourceType: "chat" | "ingest" | "manual" | "mcp" | "skill" | "listen";
-  /** 记忆类型（缺省视为 fact）；闸门判定非 fact 时强制转人工 */
+  /** 记忆类型（缺省视为 fact）；不限制自动入库 */
   kind?: MemoryKind;
-  /** 来源证据；fact 类缺少证据时闸门转人工而非直接入库 */
+  /** 来源证据；用于追溯，不作入库门槛 */
   evidence?: MemoryEvidence;
   /** 原标题（AI 可读） */
   title: string;
@@ -131,8 +131,8 @@ export type PendingEvent = {
    * 事件状态机：
    * - pending/processing：待消费/消费中
    * - done：已落盘；failed：系统类失败，可被重试
-   * - rejected：质量闸门或向量去重终拒，不参与重试
-   * - review：闸门不可用或评分存疑，待人工裁决，不被自动消费
+   * - rejected：历史终拒或已被更新版本取代，不参与重试
+   * - review：仅兼容历史数据，自动迁移为 pending
    */
   status:
     "pending" | "processing" | "done" | "failed" | "rejected" | "review" | "waiting_dependency";
@@ -147,7 +147,7 @@ export type PendingEvent = {
     configFingerprint: string;
   };
   retryCount: number;
-  /** 自动判定的稳定代码与用户可读原因；人工裁决前必须保留。 */
+  /** 自动判定的稳定代码与用户可读原因；用于处理进度与故障追溯。 */
   decisionReasonCode?: string;
   decisionReason?: string;
 };

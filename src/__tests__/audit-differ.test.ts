@@ -85,16 +85,16 @@ describe("resolveConflicts", () => {
     expect(result.action).toBe("auto_merge");
   });
 
-  it("auto_merges tags by union (no conflict)", () => {
+  it("uses candidate tags including removals", () => {
     const candidate = { ...baseRecord, tags: ["b", "c"] };
     const result = resolveConflicts(baseRecord, candidate, ["tags"]);
     expect(result.action).toBe("auto_merge");
     if (result.action === "auto_merge") {
-      expect(result.merged.tags).toEqual(["a", "b", "c"]);
+      expect(result.merged.tags).toEqual(["b", "c"]);
     }
   });
 
-  it("auto_merges graphLinks by union", () => {
+  it("uses candidate graphLinks", () => {
     const candidate = { ...baseRecord, graphLinks: ["g2"] };
     const result = resolveConflicts(baseRecord, candidate, ["graphLinks"]);
     expect(result.action).toBe("auto_merge");
@@ -103,47 +103,10 @@ describe("resolveConflicts", () => {
     }
   });
 
-  it("returns manual_decision when scalar field values differ", () => {
-    const candidate = { ...baseRecord, title: "不同标题" };
-    const result = resolveConflicts(baseRecord, candidate, ["title"]);
-    expect(result.action).toBe("manual_decision");
-    if (result.action === "manual_decision") {
-      expect(result.conflicts).toHaveLength(1);
-      expect(result.conflicts[0].field).toBe("title");
-      expect(result.conflicts[0].existingValue).toBe("原标题");
-      expect(result.conflicts[0].candidateValue).toBe("不同标题");
-    }
-  });
-
-  it("returns manual_decision when content differs", () => {
-    const candidate = { ...baseRecord, content: "新内容" };
-    const result = resolveConflicts(baseRecord, candidate, ["content"]);
-    expect(result.action).toBe("manual_decision");
-  });
-
   it("skips version / id / createdAt fields even if changed", () => {
-    const candidate = { ...baseRecord, id: "different-id", version: 99, createdAt: "1999-01-01" };
+    const candidate = { ...baseRecord, version: 99, createdAt: "1999-01-01" };
     const result = resolveConflicts(baseRecord, candidate, ["id", "version", "createdAt"]);
     expect(result.action).toBe("auto_merge");
-  });
-
-  it("collects multiple conflicts in one manual_decision result", () => {
-    const candidate = { ...baseRecord, title: "T", content: "C", summary: "S" };
-    const result = resolveConflicts(baseRecord, candidate, ["title", "content", "summary"]);
-    expect(result.action).toBe("manual_decision");
-    if (result.action === "manual_decision") {
-      expect(result.conflicts).toHaveLength(3);
-    }
-  });
-
-  it("mixed: tags auto-merge + title conflict yields manual_decision", () => {
-    const candidate = { ...baseRecord, tags: ["c"], title: "新标题" };
-    const result = resolveConflicts(baseRecord, candidate, ["tags", "title"]);
-    expect(result.action).toBe("manual_decision");
-    if (result.action === "manual_decision") {
-      expect(result.conflicts).toHaveLength(1);
-      expect(result.conflicts[0].field).toBe("title");
-    }
   });
 
   it("empty changedFields yields auto_merge with empty merged", () => {
@@ -156,31 +119,11 @@ describe("resolveConflicts", () => {
 });
 
 describe("resolveConflicts — reject 路径", () => {
-  it("rejects when candidate.version < existing.version (schema 不兼容)", () => {
+  it("allows a newer update based on an older stored version", () => {
     const existing = { ...baseRecord, version: 5 };
     const candidate = { ...baseRecord, version: 3, title: "新标题" };
     const result = resolveConflicts(existing, candidate, ["title"]);
-    expect(result.action).toBe("reject");
-    if (result.action === "reject") {
-      expect(result.reason).toContain("版本不兼容");
-      expect(result.reason).toContain("3");
-      expect(result.reason).toContain("5");
-    }
-  });
-
-  it("does NOT reject when candidate.version === existing.version", () => {
-    const existing = { ...baseRecord, version: 5 };
-    const candidate = { ...baseRecord, version: 5, title: "新标题" };
-    const result = resolveConflicts(existing, candidate, ["title"]);
-    // version 相同应进入正常比对，title 不同 → manual_decision
-    expect(result.action).toBe("manual_decision");
-  });
-
-  it("does NOT reject when candidate.version > existing.version (升级)", () => {
-    const existing = { ...baseRecord, version: 3 };
-    const candidate = { ...baseRecord, version: 5, title: "新标题" };
-    const result = resolveConflicts(existing, candidate, ["title"]);
-    expect(result.action).toBe("manual_decision");
+    expect(result.action).toBe("auto_merge");
   });
 
   it("rejects when candidate.title is empty (数据损坏)", () => {
@@ -188,8 +131,7 @@ describe("resolveConflicts — reject 路径", () => {
     const result = resolveConflicts(baseRecord, candidate, ["title"]);
     expect(result.action).toBe("reject");
     if (result.action === "reject") {
-      expect(result.reason).toContain("数据损坏");
-      expect(result.reason).toContain("title");
+      expect(result.reason).toContain("候选格式无效");
     }
   });
 
@@ -198,7 +140,7 @@ describe("resolveConflicts — reject 路径", () => {
     const result = resolveConflicts(baseRecord, candidate, ["title"]);
     expect(result.action).toBe("reject");
     if (result.action === "reject") {
-      expect(result.reason).toContain("数据损坏");
+      expect(result.reason).toContain("候选格式无效");
     }
   });
 
@@ -219,8 +161,7 @@ describe("resolveConflicts — reject 路径", () => {
     const result = resolveConflicts(baseRecord, candidate, ["tags"]);
     expect(result.action).toBe("reject");
     if (result.action === "reject") {
-      expect(result.reason).toContain("格式校验失败");
-      expect(result.reason).toContain("tags");
+      expect(result.reason).toContain("候选格式无效");
     }
   });
 
@@ -229,17 +170,8 @@ describe("resolveConflicts — reject 路径", () => {
     const result = resolveConflicts(baseRecord, candidate, ["graphLinks"]);
     expect(result.action).toBe("reject");
     if (result.action === "reject") {
-      expect(result.reason).toContain("graphLinks");
+      expect(result.reason).toContain("候选格式无效");
     }
-  });
-
-  it("reject takes priority over field comparison (version check before diff)", () => {
-    // 同时满足 reject（version 低）和 manual_decision（title 不同）
-    // 应该先 reject，不进入字段比对
-    const existing = { ...baseRecord, version: 10, title: "原标题" };
-    const candidate = { ...baseRecord, version: 1, title: "新标题" };
-    const result = resolveConflicts(existing, candidate, ["title"]);
-    expect(result.action).toBe("reject");
   });
 
   it("reject takes priority over auto_merge (data corruption before merge)", () => {

@@ -146,7 +146,7 @@ async function ingestMarkdownFileOnce(
     if (isRecentWrite(filePath)) return;
 
     const content = eventType === "delete" ? "" : await readFile(filePath, "utf-8");
-    if (eventType !== "delete" && content.length < 10) return;
+    if (eventType !== "delete" && !content.trim()) return;
 
     const sourceEvent = createSourceRevisionEvent({
       sourceType: "markdown",

@@ -6,15 +6,11 @@ import { MemoryService } from "../server/services/memory-service";
 import { KnowledgeAgent } from "../server/services/knowledge-agent";
 import { KnowledgeModelAdapter } from "../lib/ai/knowledge-model-adapter";
 import { ModelDependencyError } from "../lib/ai/dependency-error";
-import { QualityFilterService } from "../server/services/quality-filter-service";
 import { MemoryExtractionService } from "../server/services/memory-extraction-service";
-import { DependencyRecovery } from "../server/services/dependency-recovery";
 import { buildMemoryRecord } from "../lib/memory/builder";
 import { ProcessingCheckpoints } from "../server/services/processing-checkpoints";
 import { VectorBackfill } from "../server/services/vector-backfill";
 import { KnowledgeConfigService } from "../server/services/knowledge-config-service";
-import { createSourceRevisionEvent } from "../lib/source/source-revision";
-import { jsonl, meta, start, user, final } from "./fixtures/codex-dialogue";
 
 const root = process.env.MEMORY_ROOT!;
 
@@ -61,9 +57,6 @@ describe.sequential("KA-003 durable processing", () => {
   }
 
   function accept() {
-    const quality = vi
-      .spyOn(QualityFilterService.prototype, "filter")
-      .mockResolvedValue({ verdict: "accept", kind: "fact", score: 9 });
     const extraction = vi.spyOn(MemoryExtractionService.prototype, "extract").mockResolvedValue([
       {
         title: "可靠恢复",
@@ -72,12 +65,12 @@ describe.sequential("KA-003 durable processing", () => {
         tags: ["恢复"],
       },
     ]);
-    return { quality, extraction };
+    return { extraction };
   }
 
   it("publishes accepted content without a vector and keeps Markdown readable", async () => {
     const memory = stage();
-    const { quality, extraction } = accept();
+    const { extraction } = accept();
     const agent = new KnowledgeAgent();
     await agent.processQueue();
     const published = memory.getMemory("memory-one")!;
@@ -85,75 +78,67 @@ describe.sequential("KA-003 durable processing", () => {
     expect(readFileSync(getNotePath(published.topic, published.id), "utf8")).toContain(
       "持久化队列",
     );
-    expect(quality).toHaveBeenCalledOnce();
     expect(extraction).toHaveBeenCalledOnce();
     expect(memory.getEventsByStatus("review")).toHaveLength(0);
   });
 
-  it("persists service waiting across restart and does not retry before its deadline", async () => {
+  it("publishes full source on extraction failure and stays done after restart", async () => {
     const memory = stage();
-    const quality = vi
-      .spyOn(QualityFilterService.prototype, "filter")
-      .mockRejectedValue(new ModelDependencyError("flagship", "quality", "REQUEST_FAILED"));
+    const extraction = vi
+      .spyOn(MemoryExtractionService.prototype, "extract")
+      .mockRejectedValue(new ModelDependencyError("flagship", "extraction", "TIMEOUT"));
     await new KnowledgeAgent().processQueue();
-    const waiting = memory.getEventsByStatus("waiting_dependency")[0];
-    expect(waiting.dependency).toMatchObject({ attempts: 1, paused: false, stage: "quality" });
-    expect(memory.getEventsByStatus("review")).toHaveLength(0);
+    const event = memory.getEventsByStatus("done")[0];
+    expect(memory.getMemory("memory-one")?.content).toContain("重试最多三次");
+    expect(event.decisionReasonCode).toBe("PUBLISHED_SOURCE_FALLBACK");
+    expect(memory.getEventsByStatus("waiting_dependency")).toHaveLength(0);
     closeDatabase();
     invalidatePathCache();
     await new KnowledgeAgent().processQueue();
-    expect(quality).toHaveBeenCalledOnce();
-    expect(new MemoryService().getEvent(waiting.eventId)?.dependency).toEqual(waiting.dependency);
+    expect(extraction).toHaveBeenCalledOnce();
+    expect(new MemoryService().getEvent(event.eventId)?.status).toBe("done");
   });
 
-  it("pauses after three automatic retries and retains the original event", async () => {
+  it("publishes paused extraction backlog without another model request", async () => {
     const memory = stage();
-    vi.spyOn(QualityFilterService.prototype, "filter").mockRejectedValue(
-      new ModelDependencyError("flagship", "quality", "REQUEST_FAILED"),
-    );
-    const agent = new KnowledgeAgent();
-    await agent.processQueue();
-    const id = memory.getEventsByStatus("waiting_dependency")[0].eventId;
-    for (let attempt = 0; attempt < 3; attempt++) {
-      const event = memory.getEvent(id)!;
-      memory.updateEvent({
-        ...event,
-        dependency: { ...event.dependency!, nextAttemptAt: "2000-01-01T00:00:00.000Z" },
-      });
-      await agent.processQueue();
-    }
-    expect(memory.getEvent(id)?.dependency).toMatchObject({ attempts: 4, paused: true });
-    expect(memory.getMemory("memory-one")).toBeNull();
-    expect(memory.getEventsByStatus("waiting_dependency")).toHaveLength(1);
+    const pending = memory.getPendingEvents()[0];
+    memory.updateEvent({
+      ...pending,
+      status: "waiting_dependency",
+      dependency: {
+        slot: "flagship",
+        stage: "extraction",
+        reason: "REQUEST_FAILED",
+        attempts: 4,
+        lastAttemptAt: "2000-01-01",
+        paused: true,
+        configFingerprint: "config-v1",
+      },
+    });
+    const extraction = vi.spyOn(MemoryExtractionService.prototype, "extract");
+    await new KnowledgeAgent().processQueue();
+    expect(memory.getEvent(pending.eventId)?.status).toBe("done");
+    expect(memory.getMemory("memory-one")?.content).toContain("重试最多三次");
+    expect(extraction).not.toHaveBeenCalled();
+    expect(memory.migrateReviewEventsToPending()).toBe(0);
   });
 
-  it("reuses a successful quality checkpoint after extraction recovers", async () => {
-    const memory = stage();
-    const { quality, extraction } = accept();
-    extraction.mockResolvedValueOnce(null);
-    const agent = new KnowledgeAgent();
-    await agent.processQueue();
-    const waiting = memory.getEventsByStatus("waiting_dependency")[0];
-    expect(new DependencyRecovery().retry(waiting.eventId)).toBe(true);
-    await agent.processQueue();
-    expect(quality).toHaveBeenCalledOnce();
-    expect(extraction).toHaveBeenCalledTimes(2);
-    expect(memory.getEvent(waiting.eventId)?.status).toBe("done");
-  });
-
-  it("keeps the published version during a failed update", async () => {
+  it("publishes updated source even when model extraction is unavailable", async () => {
     const memory = stage();
     accept();
     const agent = new KnowledgeAgent();
     await agent.processQueue();
     const previous = memory.getMemory("memory-one")!;
-    memory.stageUpdateMemory(previous.id, { content: "新的中文内容，必须等待模型质量判断。" });
-    vi.spyOn(QualityFilterService.prototype, "filter").mockRejectedValue(
-      new ModelDependencyError("flagship", "quality", "NOT_CONFIGURED"),
-    );
+    memory.stageUpdateMemory(previous.id, { content: "新增简单命令：git status。" });
+    vi.mocked(MemoryExtractionService.prototype.extract).mockResolvedValue(null);
     await agent.processQueue();
-    expect(memory.getMemory(previous.id)?.content).toBe(previous.content);
-    expect(memory.getEventsByStatus("waiting_dependency")[0].dependency?.paused).toBe(true);
+    expect(memory.getMemory(previous.id)?.content).toBe("新增简单命令：git status。");
+    expect(memory.getEventsByStatus("waiting_dependency")).toHaveLength(0);
+    expect(
+      getDatabase()
+        .prepare("SELECT count(*) AS n FROM memory_snapshots WHERE memoryId=?")
+        .get(previous.id),
+    ).toEqual({ n: 1 });
   });
 
   it.each(["允许删除", "不允许删除", "a+b", "a-b", "重试3次", "重试4次"])(
@@ -168,38 +153,9 @@ describe.sequential("KA-003 durable processing", () => {
     },
   );
 
-  it("records cross-source exact duplicate references without another model request", async () => {
-    const memory = stage("one");
-    const { quality } = accept();
-    await new KnowledgeAgent().processQueue();
-    stage("two");
-    await new KnowledgeAgent().processQueue();
-    expect(quality).toHaveBeenCalledOnce();
-    expect(memory.getEventsByStatus("rejected")[0].decisionReasonCode).toBe("EXACT_DUPLICATE");
-    expect(getDatabase().prepare("SELECT targetMemoryId FROM content_references").get()).toEqual({
-      targetMemoryId: "one",
-    });
-  });
-
-  it("does not migrate unrelated, completed, or unproven review events", () => {
-    const memory = stage();
-    const event = memory.getPendingEvents()[0];
-    memory.updateEvent({
-      ...event,
-      status: "review",
-      decisionReasonCode: "VECTOR_RECALL_UNAVAILABLE",
-    });
-    const recovery = new DependencyRecovery();
-    const batch = recovery.preview();
-    expect(batch.items[0]).toMatchObject({ status: "skipped", reason: "MISSING_SOURCE_EVIDENCE" });
-    recovery.execute(batch.id);
-    recovery.execute(batch.id);
-    expect(memory.getEvent(event.eventId)?.status).toBe("review");
-  });
-
   it("backfills only vectors without republishing or rerunning quality", async () => {
     const memory = stage();
-    const { quality, extraction } = accept();
+    const { extraction } = accept();
     await new KnowledgeAgent().processQueue();
     const previous = memory.getMemory("memory-one")!;
     const path = getNotePath(previous.topic, previous.id);
@@ -221,83 +177,7 @@ describe.sequential("KA-003 durable processing", () => {
     ).toEqual({ status: "ready" });
     expect(memory.getMemory(previous.id)?.version).toBe(previous.version);
     expect(readFileSync(path, "utf8")).toBe(markdown);
-    expect(quality).toHaveBeenCalledOnce();
     expect(extraction).toHaveBeenCalledOnce();
-  });
-
-  it("previews a proven Codex candidate and revalidates concurrent edits", async () => {
-    const content = jsonl(meta, start(), user("恢复来源候选"), final("保持稳定事件身份。"));
-    const event = createSourceRevisionEvent({
-      sourceType: "codex",
-      sourcePath: `${root}/session.jsonl`,
-      content,
-      operation: "add",
-    });
-    const agent = new KnowledgeAgent();
-    await agent.ingestSourceRevision({
-      event,
-      content,
-      toolSource: {
-        id: "test-codex",
-        name: "Test",
-        toolType: "codex",
-        path: root,
-        filePattern: "*.jsonl",
-        enabled: true,
-        createdAt: "now",
-        updatedAt: "now",
-      },
-    });
-    const memory = new MemoryService();
-    const pending = memory.getPendingEvents()[0];
-    memory.updateEvent({
-      ...pending,
-      status: "review",
-      decisionReasonCode: "VECTOR_RECALL_UNAVAILABLE",
-    });
-    const recovery = new DependencyRecovery();
-    const first = recovery.preview();
-    expect(new DependencyRecovery().latestBatch()?.id).toBe(first.id);
-    expect(first.items[0].reason).toBe("ELIGIBLE");
-    recovery.execute(first.id);
-    recovery.execute(first.id);
-    expect(memory.getEvent(pending.eventId)?.status).toBe("pending");
-    memory.updateEvent({ ...memory.getEvent(pending.eventId)!, status: "review" });
-    const second = recovery.preview();
-    agent.updateReviewCandidate(pending.eventId, {
-      ...JSON.parse(pending.candidate),
-      title: "人工改动",
-    });
-    expect(recovery.execute(second.id).items[0].reason).toBe("CHANGED_SINCE_PREVIEW");
-    expect(recovery.preview().items[0].reason).toBe("EDITED_OR_UNPROVEN");
-    expect(memory.getEvent(pending.eventId)?.status).toBe("review");
-  });
-
-  it("recovers a 325 item backlog in one bounded batch despite overlapping consumers", async () => {
-    const memory = new MemoryService();
-    for (let i = 0; i < 325; i++) stage(`batch-${i}`, `唯一来源编号 ${i}`);
-    for (const event of memory.getPendingEvents())
-      memory.updateEvent({
-        ...event,
-        status: "waiting_dependency",
-        dependency: {
-          slot: "flagship",
-          stage: "quality",
-          reason: "REQUEST_FAILED",
-          attempts: 1,
-          lastAttemptAt: "2000-01-01",
-          nextAttemptAt: "2000-01-02",
-          paused: false,
-          configFingerprint: "config-v1",
-        },
-      });
-    const quality = vi
-      .spyOn(QualityFilterService.prototype, "filter")
-      .mockResolvedValue({ verdict: "review", reason: "内容存疑" });
-    await Promise.all([new KnowledgeAgent().processQueue(), new KnowledgeAgent().processQueue()]);
-    expect(quality).toHaveBeenCalledTimes(20);
-    expect(memory.getEventsByStatus("waiting_dependency")).toHaveLength(305);
-    expect(memory.getEventsByStatus("review")).toHaveLength(20);
   });
 
   it.each(["delete", "update", "disable", "model"])(

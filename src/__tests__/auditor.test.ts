@@ -168,37 +168,6 @@ describe("Auditor.process — 三种分流", () => {
     expect(store.dequeueByIdCalls).toEqual(["evt-optimization"]);
   });
 
-  it("returns status=conflict when scalar field values differ", async () => {
-    const existing = makeMemory({ id: "m1", title: "原标题" });
-    const candidate = makeMemory({ id: "m1", title: "新标题" });
-    const event = makeEvent("m1", candidate, ["title"]);
-    const store = makeMockStore({ memory: existing, event });
-    const auditor = new Auditor(store);
-
-    const result = await auditor.process("m1");
-    expect(result!.status).toBe("conflict");
-    expect(result!.resolution!.action).toBe("manual_decision");
-    if (result!.resolution!.action === "manual_decision") {
-      expect(result!.resolution!.conflicts).toHaveLength(1);
-      expect(result!.resolution!.conflicts[0].field).toBe("title");
-    }
-  });
-
-  it("只审计事件声明的字段，不把系统 updatedAt 生成人工冲突", async () => {
-    const existing = makeMemory({ id: "m1", content: "旧", updatedAt: "2026-01-01" });
-    const candidate = makeMemory({ id: "m1", content: "新", updatedAt: "2026-01-02" });
-    const event = makeEvent("m1", candidate, ["content"]);
-    const store = makeMockStore({ memory: existing, event });
-    const auditor = new Auditor(store);
-
-    const result = await auditor.process("m1");
-
-    expect(result!.status).toBe("conflict");
-    if (result!.resolution!.action === "manual_decision") {
-      expect(result!.resolution!.conflicts.map((conflict) => conflict.field)).toEqual(["content"]);
-    }
-  });
-
   it("returns status=failed when candidate JSON is corrupted", async () => {
     const event: PendingEvent = {
       eventId: "evt-bad",
@@ -239,37 +208,7 @@ describe("Auditor.process — 三种分流", () => {
     expect(snapshotData.title).toBe("T"); // 快照保留的是 existing
   });
 
-  it("mixed case: tags auto-merge + title conflict → overall conflict", async () => {
-    const existing = makeMemory({ id: "m1", tags: ["a"], title: "原" });
-    const candidate = makeMemory({ id: "m1", tags: ["b"], title: "新" });
-    const event = makeEvent("m1", candidate, ["tags", "title"]);
-    const store = makeMockStore({ memory: existing, event });
-    const auditor = new Auditor(store);
-
-    const result = await auditor.process("m1");
-    expect(result!.status).toBe("conflict");
-    if (result!.resolution!.action === "manual_decision") {
-      // 只有 title 进入冲突列表，tags 已自动合并
-      expect(result!.resolution!.conflicts).toHaveLength(1);
-      expect(result!.resolution!.conflicts[0].field).toBe("title");
-    }
-  });
-
-  it("multiple conflicting fields all appear in manual_decision", async () => {
-    const existing = makeMemory({ id: "m1", title: "T1", content: "C1", summary: "S1" });
-    const candidate = makeMemory({ id: "m1", title: "T2", content: "C2", summary: "S2" });
-    const event = makeEvent("m1", candidate, ["title", "content", "summary"]);
-    const store = makeMockStore({ memory: existing, event });
-    const auditor = new Auditor(store);
-
-    const result = await auditor.process("m1");
-    expect(result!.status).toBe("conflict");
-    if (result!.resolution!.action === "manual_decision") {
-      expect(result!.resolution!.conflicts).toHaveLength(3);
-    }
-  });
-
-  it("returns status=failed with reason when candidate version is older (reject)", async () => {
+  it("automatically processes a candidate based on an older version", async () => {
     const existing = makeMemory({ id: "m1", version: 10, title: "T" });
     const candidate = makeMemory({ id: "m1", version: 2, title: "T2" });
     const event = makeEvent("m1", candidate, ["title"]);
@@ -277,13 +216,8 @@ describe("Auditor.process — 三种分流", () => {
     const auditor = new Auditor(store);
 
     const result = await auditor.process("m1");
-    expect(result!.status).toBe("failed");
-    expect(result!.resolution!.action).toBe("reject");
-    if (result!.resolution!.action === "reject") {
-      expect(result!.resolution!.reason).toContain("版本不兼容");
-      // error 字段应透传 reject 的 reason
-      expect(result!.error).toBe(result!.resolution!.reason);
-    }
+    expect(result!.status).toBe("done");
+    expect(result!.resolution!.action).toBe("auto_merge");
   });
 
   it("returns status=failed when candidate has corrupted data (reject)", async () => {
@@ -297,6 +231,6 @@ describe("Auditor.process — 三种分流", () => {
     const result = await auditor.process("m1");
     expect(result!.status).toBe("failed");
     expect(result!.resolution!.action).toBe("reject");
-    expect(result!.error).toContain("数据损坏");
+    expect(result!.error).toContain("候选格式无效");
   });
 });

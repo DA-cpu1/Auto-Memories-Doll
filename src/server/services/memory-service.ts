@@ -666,6 +666,13 @@ export class MemoryService {
       event.dependency ? JSON.stringify(event.dependency) : null,
       event.eventId,
     );
+    if (event.status === "done") {
+      this.db
+        .prepare(
+          "UPDATE conflict_records SET status = 'resolved_accept', resolution = '自动按最新时间处理', resolvedAt = ? WHERE eventId = ? AND status = 'pending'",
+        )
+        .run(new Date().toISOString(), event.eventId);
+    }
   }
 
   updateEventCandidate(eventId: string, candidate: MemoryRecord, changedFields: string[]): void {
@@ -822,10 +829,51 @@ export class MemoryService {
 
   /** Automatically resumes legacy review events after manual review removal. */
   migrateReviewEventsToPending(): number {
-    const result = this.db
-      .prepare("UPDATE pending_events SET status = 'pending' WHERE status = 'review'")
-      .run();
-    return Number(result.changes);
+    return this.db.transaction(() => {
+      const modelWaits = this.db
+        .prepare(
+          `UPDATE pending_events
+        SET status = 'pending', dependency = NULL, retryCount = 0,
+            decisionReasonCode = 'AUTO_PUBLISH_SOURCE', decisionReason = '模型整理失败，自动保存原文'
+        WHERE status = 'waiting_dependency' AND json_valid(dependency)
+          AND json_extract(dependency, '$.stage') IN ('extraction', 'quality')`,
+        )
+        .run();
+      let legacyFailures = 0;
+      for (const event of this.getEventsByStatus("failed")) {
+        if (event.decisionReasonCode || event.retryCount < 3) continue;
+        try {
+          const candidate = JSON.parse(event.candidate) as MemoryRecord;
+          if (
+            !validateMemoryRecord(candidate) ||
+            !candidate.content.trim() ||
+            candidate.id !== event.memoryId
+          )
+            continue;
+          this.updateEvent({
+            ...event,
+            status: "pending",
+            retryCount: 0,
+            dependency: undefined,
+            decisionReasonCode: "AUTO_PUBLISH_SOURCE",
+            decisionReason: "旧失败任务恢复一次，保存完整原文",
+          });
+          legacyFailures++;
+        } catch {
+          // Invalid historical records must remain failed; do not fabricate valid content.
+        }
+      }
+      const result = this.db
+        .prepare(
+          `UPDATE pending_events SET status = 'pending', dependency = NULL,
+        retryCount = 0, decisionReasonCode = 'AUTO_PUBLISH_MIGRATED', decisionReason = '自动发布旧候选'
+        WHERE status = 'review' OR
+          (status = 'waiting_dependency' AND json_valid(dependency) AND json_extract(dependency, '$.stage') = 'quality') OR
+          (status = 'done' AND eventId IN (SELECT eventId FROM conflict_records WHERE status = 'pending'))`,
+        )
+        .run();
+      return Number(result.changes) + Number(modelWaits.changes) + legacyFailures;
+    })();
   }
 
   cancelUnpublishedSourceEvents(sourceId: string): string[] {

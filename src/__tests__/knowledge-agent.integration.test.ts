@@ -4,10 +4,8 @@ import { dirname, join } from "node:path";
 import { closeDatabase } from "../lib/storage/database";
 import { invalidatePathCache } from "../lib/storage/path-resolver";
 import { createSourceRevisionEvent } from "../lib/source/source-revision";
-import { KnowledgeModelAdapter } from "../lib/ai/knowledge-model-adapter";
 import { KnowledgeAgent } from "../server/services/knowledge-agent";
 import { MemoryService } from "../server/services/memory-service";
-import { QualityFilterService } from "../server/services/quality-filter-service";
 
 const memoryRoot = process.env.MEMORY_ROOT!;
 
@@ -124,63 +122,6 @@ describe.sequential("KnowledgeAgent source orchestration", () => {
       ],
     );
     afterRestart.close();
-  });
-
-  it("owns queue processing and emits a review state for content uncertainty", async () => {
-    vi.spyOn(QualityFilterService.prototype, "filter").mockResolvedValue({
-      verdict: "review",
-      reason: "证据不足",
-    });
-    vi.spyOn(KnowledgeModelAdapter, "isDegradedMode", "get").mockReturnValue(true);
-    const sourcePath = join(memoryRoot, "imports", "needs-review.md");
-    const content = "# Needs review\n\n模型不可用时，这条候选不能默认发布。";
-    mkdirSync(dirname(sourcePath), { recursive: true });
-    writeFileSync(sourcePath, content, "utf-8");
-    const event = createSourceRevisionEvent({
-      sourceType: "markdown",
-      sourcePath,
-      content,
-      operation: "add",
-    });
-    const agent = new KnowledgeAgent();
-    const staged = await agent.ingestSourceRevision({ event, sourceLocator: sourcePath });
-
-    await agent.processQueue();
-
-    const queue = new MemoryService();
-    const [review] = queue.getEventsByStatus("review");
-    expect(review).toMatchObject({
-      memoryId: staged.memoryIds[0],
-      sourceEventId: event.eventId,
-      sourceRevision: event.revision,
-    });
-    expect(queue.getMemory(staged.memoryIds[0])).toBeNull();
-    const original = JSON.parse(review.candidate);
-    agent.updateReviewCandidate(review.eventId, {
-      title: "人工修订标题",
-      summary: "人工修订摘要",
-      content: original.content,
-      tags: [...original.tags, "reviewed"],
-      topic: original.topic,
-    });
-    const edited = JSON.parse(queue.getEvent(review.eventId)!.candidate);
-    expect(edited).toMatchObject({
-      title: "人工修订标题",
-      summary: "人工修订摘要",
-      tags: expect.arrayContaining(["reviewed"]),
-    });
-    expect(queue.getMemory(staged.memoryIds[0])).toBeNull();
-    queue.close();
-    expect(agent.listProgress({ eventId: event.eventId }).slice(-2)).toEqual([
-      expect.objectContaining({ stage: "processing", outcome: "completed" }),
-      expect.objectContaining({
-        stage: "review",
-        outcome: "waiting",
-        errorCode: "QUALITY_REVIEW_REQUIRED",
-        error: expect.stringContaining("证据不足"),
-      }),
-    ]);
-    agent.close();
   });
 
   it("routes tool sessions and listen payloads through the same source contract", async () => {

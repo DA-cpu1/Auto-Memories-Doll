@@ -94,7 +94,7 @@ describe("LKA-001 Phase 5 product boundary", () => {
     const settings = source("src/components/settings/SettingsLayout.tsx");
 
     expect(homepage).toContain('href: "/settings/tools"');
-    expect(homepage).toContain('href: "/audit"');
+    expect(homepage).not.toContain('href: "/audit"');
     expect(homepage).toContain('href="/memory"');
     expect(homepage).not.toMatch(/href[:=]\s*["']\/(?:chat|profile)/);
     expect(settings).not.toMatch(/settings\/(?:mcp|skills|profile|prompts)/);

@@ -6,7 +6,7 @@ import { VersionManager } from "./version-manager";
 export type AuditResult = {
   eventId: string;
   memoryId: string;
-  status: "done" | "conflict" | "failed";
+  status: "done" | "failed";
   diffs: DiffResult[];
   resolution?: ConflictResolution;
   error?: string;
@@ -59,7 +59,7 @@ export class Auditor {
       }
 
       // 以入队时声明的变更字段为准，避免 updatedAt/version 等系统字段
-      // 被误生成人工冲突；兼容旧事件时才从 diff 推导。
+      // 被误识别为内容修改；兼容旧事件时才从 diff 推导。
       const changedFields =
         event.changedFields.length > 0 ? event.changedFields : extractChangedFields(diffs);
       const resolution = resolveConflicts(existing, candidate, changedFields);
@@ -67,16 +67,16 @@ export class Auditor {
 
       if (resolution.action === "auto_merge") {
         result.status = "done";
-      } else if (resolution.action === "manual_decision") {
-        result.status = "conflict";
       } else {
         // reject 路径：schema 不兼容 / 数据损坏 / 格式校验失败
-        // 按 AGENTS.md 4.10 "不可合并——触发人工接管，不写入任何变更"
+        // 格式错误进入失败重试，不生成待审核记录。
         result.status = "failed";
         result.error = resolution.reason;
       }
 
-      this.versionManager.createSnapshot(existing, existing.version);
+      if (resolution.action === "auto_merge" && Object.keys(resolution.merged).length > 0) {
+        this.versionManager.createSnapshot(existing, existing.version);
+      }
 
       return result;
     } catch (error) {

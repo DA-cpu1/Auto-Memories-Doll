@@ -23,7 +23,7 @@ describe("knowledge agent state transitions", () => {
     for (let index = 1; index < publishPath.length; index++) {
       expect(canTransitionAgentStage(publishPath[index - 1], publishPath[index])).toBe(true);
     }
-    expect(canTransitionAgentStage("processing", "review")).toBe(true);
+    expect(canTransitionAgentStage("processing", "review")).toBe(false);
     expect(canTransitionAgentStage("review", "accepted")).toBe(true);
     expect(canTransitionAgentStage("review", "rejected")).toBe(true);
     expect(canTransitionAgentStage("processing", "failed_retryable")).toBe(true);
@@ -34,13 +34,13 @@ describe("knowledge agent state transitions", () => {
     expect(() => assertAgentStageTransition("discovered", "publishing")).toThrow(
       "非法 Agent 状态迁移",
     );
-    expect(canTransitionAgentStage("done", "processing")).toBe(false);
+    expect(canTransitionAgentStage("done", "processing")).toBe(true);
     expect(canTransitionAgentStage("rejected", "processing")).toBe(false);
   });
 
   it("keeps persisted queue terminal states terminal", () => {
     expect(canTransitionPendingEventStatus("pending", "processing")).toBe(true);
-    expect(canTransitionPendingEventStatus("processing", "review")).toBe(true);
+    expect(canTransitionPendingEventStatus("processing", "review")).toBe(false);
     expect(canTransitionPendingEventStatus("review", "processing")).toBe(true);
     expect(canTransitionPendingEventStatus("review", "pending")).toBe(true);
     expect(canTransitionPendingEventStatus("failed", "pending")).toBe(true);

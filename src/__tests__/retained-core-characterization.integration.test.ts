@@ -14,7 +14,6 @@ import { buildMemoryRecord, buildPendingEvent } from "../lib/memory/builder";
 
 const memoryRoot = process.env.MEMORY_ROOT!;
 const sourcePath = join(memoryRoot, "imports", "retained-source.md");
-let qualityScore = 9;
 
 function llmResponse(content: string, model = "characterization-model"): LlmResponse {
   return {
@@ -43,15 +42,6 @@ function installAcceptingModelBoundary(): void {
     if (prompt.includes("知识库话题分类器")) {
       return llmResponse('{"topic":"learning","confidence":0.95,"reason":"技术学习资料"}');
     }
-    if (prompt.includes("记忆入库质量闸门")) {
-      return llmResponse(
-        JSON.stringify({
-          score: qualityScore,
-          kind: "fact",
-          reason: qualityScore >= 8 ? "包含可复用的具体经验" : "信息仍需人工确认",
-        }),
-      );
-    }
     if (prompt.includes("记忆库的编辑")) {
       return llmResponse(
         '{"memories":[{"title":"TypeScript 构建缓存","summary":"通过增量缓存缩短重复构建时间。","content":"开启 TypeScript 增量构建并保存缓存，可以减少未变更模块的重复编译。","tags":["TypeScript","构建优化"]}]}',
@@ -63,7 +53,6 @@ function installAcceptingModelBoundary(): void {
 
 beforeEach(() => {
   resetStorage();
-  qualityScore = 9;
   installAcceptingModelBoundary();
 });
 
@@ -155,8 +144,7 @@ describe.sequential("retained local knowledge pipeline characterization", () => 
     reader.close();
   });
 
-  it("keeps an uncertain candidate in review without publishing it", async () => {
-    qualityScore = 6;
+  it("publishes uncertain candidates automatically", async () => {
     const candidate = buildMemoryRecord(
       "local-review-source.md",
       "ingest",
@@ -180,14 +168,13 @@ describe.sequential("retained local knowledge pipeline characterization", () => 
     orchestrator.close();
 
     const reader = new MemoryService();
-    expect(reader.getEvent(event.eventId)?.status).toBe("review");
-    expect(reader.getMemory(candidate.id)).toBeNull();
+    expect(reader.getEvent(event.eventId)?.status).toBe("done");
+    expect(reader.getMemory(candidate.id)).not.toBeNull();
     reader.close();
-    expect(existsSync(getNotePath("learning", candidate.id))).toBe(false);
+    expect(existsSync(getNotePath("learning", candidate.id))).toBe(true);
   });
 
-  it("terminally rejects a low-quality candidate without publishing it", async () => {
-    qualityScore = 2;
+  it("publishes simple candidates automatically", async () => {
     const candidate = buildMemoryRecord(
       "local-noise-source.md",
       "ingest",
@@ -211,8 +198,8 @@ describe.sequential("retained local knowledge pipeline characterization", () => 
     orchestrator.close();
 
     const reader = new MemoryService();
-    expect(reader.getEvent(event.eventId)).toMatchObject({ status: "rejected", retryCount: 0 });
-    expect(reader.getMemory(candidate.id)).toBeNull();
+    expect(reader.getEvent(event.eventId)).toMatchObject({ status: "done", retryCount: 0 });
+    expect(reader.getMemory(candidate.id)).not.toBeNull();
     expect(reader.getPendingEvents()).toHaveLength(0);
     reader.close();
   });
@@ -286,7 +273,7 @@ describe.sequential("retained local knowledge pipeline characterization", () => 
     reader.close();
   });
 
-  it("records a scalar update conflict without overwriting the accepted value", async () => {
+  it("automatically publishes scalar updates without pending conflicts", async () => {
     const existing = buildMemoryRecord(
       "accepted-source.md",
       "manual",
@@ -309,19 +296,11 @@ describe.sequential("retained local knowledge pipeline characterization", () => 
 
     const reader = new MemoryService();
     expect(reader.getEvent(eventId)?.status).toBe("done");
-    expect(reader.getMemory(existing.id)?.title).toBe("原始标题");
+    expect(reader.getMemory(existing.id)?.title).toBe("候选新标题");
     reader.close();
 
     const audit = new AuditService();
-    expect(audit.listConflicts("pending")).toEqual([
-      expect.objectContaining({
-        memoryId: existing.id,
-        eventId,
-        field: "title",
-        existingValue: JSON.stringify("原始标题"),
-        candidateValue: JSON.stringify("候选新标题"),
-      }),
-    ]);
+    expect(audit.listConflicts("pending")).toEqual([]);
     audit.close();
   });
 });
