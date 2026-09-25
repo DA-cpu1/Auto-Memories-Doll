@@ -1,6 +1,6 @@
 # Auto-Memories-Doll
 
-本地优先的知识整理 Agent。它观察 Markdown、文本和开发工具会话目录，把有效来源消息自动保存为可检索、可追溯的 Markdown 知识与主题学习资料。
+本地优先的知识整理 Agent。它观察 Markdown、文本和开发工具会话目录，把有效来源消息自动保存为可检索、可追溯的 Markdown 知识与主题学习资料；首页可以直接向知识库提问，答案由工具循环取证并逐条校验引用，找不到依据时严格拒答。
 
 这不是聊天产品。项目不提供聊天会话、用户画像、人格 Prompt、聊天型 MCP/Skills 或浏览器历史采集。
 
@@ -20,6 +20,9 @@ flowchart LR
   K --> M[HNSW 或 JS 精确检索]
   L --> N[检索与阅读 UI]
   M --> N
+  J --> O[问答 Agent 工具循环]
+  M --> O
+  O --> P[带引用流式回答 / 无依据拒答]
 ```
 
 当前策略（LKA-004）：所有格式有效的非空消息自动入库，不再以质量评分、长度或语义相似度拒绝发布，也不需要人工审核。未变化来源不会重复入队；不同来源的相同正文可以分别保存。候选先进入持久化队列，再按同一记忆 ID 串行发布；更新保留版本快照。模型整理失败时保存完整原文，Embedding 不可用时仍可发布并使用关键词检索。
@@ -73,6 +76,11 @@ VECTOR_BACKEND=hnsw
 4. 等待后台自动发布；入队不代表已经写入 Markdown，以完成状态和检索结果为准。
 5. 在检索库使用关键词、向量、标签、查询改写、图谱邻居和 MMR 重排。
 6. 打开主题资料，沿知识链接与来源版本追溯原始依据。
+7. 在首页输入自然语言问题并点击“提问”：答案流式返回，末尾附已校验的引用卡片。
+
+### 问答 Agent
+
+首页“提问”走 `POST /api/ask`（SSE 流式）。模型在最多 6 步的工具循环中调用 `search_memory`、`read_memory`、`read_source_document`、`read_topic_guide` 四个本地工具取证，答案末尾必须附 `<citations>` 引用区块；服务端逐条校验每个 `memoryId` 真实存在、引用片段确为该记忆原文（归一化子串比对）。零引用或任何校验失败都会严格拒答并说明缺口，不展示未验证内容。每次问答的问题、答案、引用、工具轨迹与 token 消耗记录在 `ask_logs` 表，首页与 `GET /api/ask` 可查累计统计。端点不支持流式或 tools 时自动降级为非流式缓冲循环、再降级为 JSON 手工循环，实际执行模式随记录落库。
 
 外部工具也可以向 `POST /api/listen` 发送类型化会话：
 
@@ -113,6 +121,8 @@ memory-root/
 | --- | --- |
 | LLM 不可用或输出非法 | 整理失败时自动保存完整原文；恢复后的新任务继续使用模型，已保存原文不会自动改写 |
 | Embedding 关闭或不可用 | 不阻塞发布，搜索退回关键词；启用并恢复后后台补建缺失向量 |
+| 问答无依据或引用校验失败 | 严格拒答并说明缺口，不展示未验证答案；问答记录仍落 `ask_logs` |
+| 端点不支持流式 / tools | 自动降级非流式缓冲循环、再降级 JSON 手工循环；已有输出后不再降级 |
 | 来源未变化 | 返回 unchanged/no-op，不创建副本 |
 | 进程在 processing 中断 | 原事件恢复，attempt 递增后重试 |
 | Markdown 写入或 schema 校验失败 | 保留失败上下文，不静默覆盖 |
@@ -172,7 +182,7 @@ TypeScript、Next.js 14、React 18、Vercel AI SDK、Zod、better-sqlite3、Chok
 
 ## English
 
-Auto-Memories-Doll is a local-first knowledge organization agent. It automatically publishes valid messages from versioned local files and development-tool sessions as traceable Markdown knowledge and cited study guides. Model extraction failures fall back to the complete source text. Unchanged sources are idempotent, updates retain version snapshots, and publishing and keyword search continue when embeddings are unavailable. Codex collection waits for completed dialogue turns and excludes reasoning and tool events.
+Auto-Memories-Doll is a local-first knowledge organization agent. It automatically publishes valid messages from versioned local files and development-tool sessions as traceable Markdown knowledge and cited study guides. The homepage also offers an ask agent: answers come from a tool loop over the local knowledge base, every citation is verified against the cited memory, and questions without grounded evidence are strictly refused. Model extraction failures fall back to the complete source text. Unchanged sources are idempotent, updates retain version snapshots, and publishing and keyword search continue when embeddings are unavailable. Codex collection waits for completed dialogue turns and excludes reasoning and tool events.
 
 Use Node.js 22+ and npm 10+, run `npm ci`, copy `.env.example` to `.env.local`, then run `npm run dev`. Model credentials are optional. See the LKA-004 delivery report for the current behavior and migration boundaries; earlier Phase 8 documents describe historical behavior.
 

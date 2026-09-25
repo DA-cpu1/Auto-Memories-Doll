@@ -20,6 +20,7 @@
 | **工具会话采集** | 监听 Cursor/Codex/Claude Code 工作目录，解析会话文件自动入队 | `src/server/watchers/tool-dir-watcher.ts` |
 | **多路召回** | 原句 + budget 模型改写变体并行检索、按最高相似度合并去重；改写失败自动退回单路 | `src/lib/vector/query-expansion.ts` / `query-rewriter.ts` |
 | **检索评测** | 固定评测集上的 Recall@k / MRR 回归基线，报告写入 `evals/reports/`，`npm run eval` 触发 | `src/eval/retrieval-eval.test.ts` |
+| **问答 Agent** | 首页自然语言提问：SSE 流式工具循环取证 + 引用逐条校验，无依据严格拒答，轨迹与 token 消耗落 `ask_logs` | `src/server/services/ask-agent-service.ts` / `src/lib/ai/ask-model.ts` |
 | **死代码门禁** | 从页面、API、middleware、instrumentation 与集中契约遍历生产 import 图，阻止不可达模块回流 | `scripts/audit-dead-code.mjs` |
 
 ## 1. 文档目标
@@ -87,10 +88,12 @@ src/
 │     ├─ memory/search/route.ts # 记忆搜索
 │     ├─ ingest/route.ts        # 后台数据接入入口
 │     ├─ listen/route.ts        # 外部工具监听入口（Trae/浏览器 AI 会话）
+│     ├─ ask/route.ts           # 问答 Agent SSE 入口（POST 流式 + GET 统计）
 │     ├─ audit/route.ts         # 审计入口
 │     ├─ audit/conflicts/route.ts # 冲突管理
 │     └─ config/                # 配置管理（AI/存储/工具来源）
 ├─ components/
+│  ├─ ask/                      # 首页提问与检索面板（AskPanel）
 │  ├─ memory/                   # 知识检索、详情与图谱组件
 │  ├─ settings/                 # AI、存储路径与工具来源设置
 │  ├─ common/                   # 公共组件
@@ -324,6 +327,30 @@ KnowledgeAgent 不依赖 React 或 Next.js Route Handler，也不提供通用聊
 - **Trae IDE**：在 AI 对话完成后，调用 `POST /api/listen` 发送对话数据
 - **浏览器**：安装 `capture.js` 书签，点击即可捕获当前 AI 页面
 - **任意工具**：只需发送符合格式的 HTTP POST 请求即可接入
+
+### 4.6.3 问答 Agent 子系统
+
+首页“提问”入口走 `POST /api/ask`（SSE 流式），对已发布知识做带引用校验的问答。这是只读能力：问答不产生新记忆，不写任何知识文件。
+
+**API 端点**：
+- `POST /api/ask` — 请求体 `{question: string(1-500)}`；响应 `text/event-stream`，每帧 `data: <AskStreamEvent JSON>`，事件序列：`start → (tool_call | tool_result | token)* → citations | refusal → done | error`
+- `GET /api/ask` — 返回累计统计（提问数、拒答数、token 消耗、最近提问时间）
+
+**处理流程**：
+1. Zod 校验请求体（失败返回统一 JSON 错误，流不开始）
+2. `AskAgentService.ask()` 调用 `runAskLoop()`（`src/lib/ai/ask-model.ts`）：standard 档模型 + `streamText` 原生工具循环，`stopWhen: stepCountIs(6)`，整链路超时 120s（`ASK_TIMEOUT_MS`）
+3. 模型在循环内调用四个只读取证工具（`src/server/services/ask-tools.ts`）：`search_memory`（语义检索，embedding 不可用自动退关键词）、`read_memory`（读记忆全文，引用片段的合法来源）、`read_source_document`（按 sourceId 读原始来源文件，超 8000 字截断）、`read_topic_guide`（主题学习资料大纲与章节）
+4. 模型答案末尾必须附 `<citations>[{memoryId, quote}]</citations>` 引用区块；`splitAnswerAndCitations` 解析（多区块取最后一个，正文示例不干扰）
+5. **引用校验硬闸门**（`verifyCitations`）：每个 memoryId 必须真实存在，quote 去空白小写归一化后必须是被引记忆 content/summary/title 的子串，且长度 ≥ 6 字符。零引用或任何一条失败 → 严格拒答（不展示未验证答案），拒答附原因与建议（模型按协议描述缺口时复用其描述）
+6. 每次问答落库 `ask_logs` 表（`src/server/services/ask-log-service.ts`）：question、answer、refused、citations、toolTrace、token 用量、model、mode、durationMs、createdAt；`GET /api/ask` 与首页展示累计 token 统计
+
+**降级链**（`runAskLoop` 内）：流式工具循环 →（失败前无任何 token/工具活动时）非流式 `generateText` 缓冲循环 →（tools 参数不被端点支持时）JSON 手工循环（ReAct 式：模型每轮输出 `{"action":{tool,args}}` 或 `{"final":答案}`，`parseModelObject` 剥 `<think>` 后解析）。实际执行模式以 `mode` 字段落库（stream/buffered/json-loop）。一旦循环已产出 token 或执行过工具，不再降级，直接报错——避免重复执行副作用与重复计费。
+
+**边界约束**：
+- 问答模型调用走 `src/lib/ai/ask-model.ts` 旁路，**不得**并入 `KnowledgeModelAdapter`（其契约刻意非流式，被知识加工与健康检查复用）
+- 工具全部只读；工具失败返回 `{ok:false,error}` 交给模型自行纠正，不抛错中断
+- reasoning 流（`<think>` 块）不进入答案、不回传前端
+- 前端 `AskPanel`（`src/components/ask/AskPanel.tsx`）在拒答事件到达时丢弃已流出的答案文本，只展示拒答说明
 
 ### 4.7 记忆目录结构
 记忆系统使用本地文件夹承载，建议结构如下：
@@ -689,6 +716,7 @@ export type ConflictRecord = {
 
 | 偏差项 | AGENTS.md 描述 | 实际代码 | 优先级 |
 |--------|---------------|---------|--------|
+| 中转站 tools/SSE 透传未实测 | 4.6.3 问答 Agent 依赖 `streamText` + `tools` 原生循环 | 实现于 2026-09-25，但探测请求被 MiniMax Token Plan 配额耗尽（HTTP 402）拦截在计费层，未触达模型；官方文档声明支持 tools 与 SSE。两级降级（非流式缓冲 / JSON 手工循环）已实现并以 `mode` 字段落库；配额恢复或更换模型后需实测，通过则移除降级路径 | P2 |
 | 模型环境变量未接入当前配置初始化 | 历史文档要求从 MODEL_API_KEY 等环境变量读取模型配置 | 当前 provider 与 KnowledgeModelAdapter 只读取 KnowledgeConfigService 的 SQLite 配置，初始化使用内置默认值；README 与 .env.example 已明确要求在设置页配置。统一环境变量初始化策略预期修复版本：LKA-005 | P2 |
 | 历史降级被误报为当前故障 | 当前能力应由实时模型状态决定，恢复后可见 | 已修复（LKA-004，2026-09-10）：首页不再合并历史 progress 的降级标记；全局提示读取 /api/health，展示槽位、模型、原因、发生时间与耗时；恢复检查只对失败且退避结束的空闲槽位发短请求。连接测试明确为表单普通模型的基础连通性检查。预期修复版本：LKA-004（本次交付） | ~~P1~~ |
 | 人工筛选阻塞简单消息入库 | 历史版本要求质量阈值、证据闸门与人工冲突裁决 | LKA-004 已移除评分服务、审核页面及 API；旧 review/质量等待/待解决冲突自动排队，更新时间决定字段覆盖并写归档快照。预期修复版本：LKA-004（本次交付） | ~~P1~~ |
@@ -1003,3 +1031,13 @@ Phase 8 — 验证和作品集交付
 - [x] 自动恢复只检查失败、退避结束且空闲的槽位，串行短请求最多 128 输出 token，不再轮询全部健康模型。
 - [x] 配置变更后旧请求的失败不污染新配置；连接测试标注范围与保存要求。
 - [x] 使用真实模型的合成短请求与 JSON 整理请求验证当前可用；测试与运行边界见 docs/specs/004-automatic-publishing/model-health-fix.md。
+
+### 问答 Agent 交付（2026-09-25）
+
+- [x] 首页“提问”入口：`POST /api/ask` SSE 流式（start/tool_call/tool_result/token/citations/refusal/done/error 事件契约）+ `GET /api/ask` 累计统计；`AskPanel` 组件承载提问与原关键词检索双入口，拒答时丢弃已流出答案。
+- [x] 工具循环：standard 档 + `streamText` + `stopWhen: stepCountIs(6)`，四只读工具（search_memory/read_memory/read_source_document/read_topic_guide），轨迹与 token 落 `ask_logs`。
+- [x] 引用校验硬闸门：memoryId 存在性 + quote 归一化子串比对 + 最小长度；零引用或失败严格拒答（Q12 决策），拒答附建议。
+- [x] 两级降级：非流式缓冲循环、JSON 手工循环（ReAct 式，`parseModelObject` 剥 `<think>`）；已有活动不降级；模式落库。
+- [x] 清理：删除 `deduplicator.ts`（LKA-004 下精确去重为设计如此，`processJsonPipeline` 死参数移除）与六个空脚手架目录；死代码审计 159 个生产模块可达。
+- [x] 门禁：493 条单元/集成测试、7 条 Playwright E2E、生产构建、typecheck/lint/format/eval 通过；`phase-5-scope-removal` 产品边界测试改为按首页组合（page + AskPanel）校验检索入口。
+- [ ] 待办：MiniMax 配额恢复或换模型后实测 tools/SSE 透传，通过则移除降级路径（见 11.1 偏差表）。

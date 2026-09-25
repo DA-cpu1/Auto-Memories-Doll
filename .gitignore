@@ -102,3 +102,9 @@ evals/reports/
 # Local browser verification artifacts
 .playwright-cli/
 output/playwright/
+
+# ═══ Agent 工具与个人面试资料 —— 严禁上传 ═══
+.agents/
+.zcode/
+.zcodeignore
+interview_saves/

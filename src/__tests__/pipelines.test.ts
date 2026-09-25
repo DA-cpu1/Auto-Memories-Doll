@@ -1,5 +1,4 @@
 import { describe, it, expect } from "vitest";
-import { deduplicateMemories, detectDuplicates } from "../server/pipelines/deduplicator";
 import {
   formatMemoryContent,
   formatSummary,
@@ -7,75 +6,6 @@ import {
 } from "../server/pipelines/formatter";
 import { splitText } from "../server/pipelines/splitter";
 import { extractTags } from "../server/pipelines/json-pipeline";
-
-// ═══════════════════════════════════════════════════════════════
-// Deduplicator
-// ═══════════════════════════════════════════════════════════════
-
-describe("deduplicateMemories", () => {
-  it("完全相同内容返回 duplicate id", () => {
-    const ids = deduplicateMemories([
-      { id: "a", content: "hello world" },
-      { id: "b", content: "hello world" },
-    ]);
-    expect(ids).toEqual(["b"]);
-  });
-
-  it("大小写和标点差异不作为精确重复", () => {
-    const ids = deduplicateMemories([
-      { id: "a", content: "Hello, World!" },
-      { id: "b", content: "hello world" },
-    ]);
-    expect(ids).toEqual([]);
-  });
-
-  it("不同内容不应标记为重复", () => {
-    const ids = deduplicateMemories([
-      { id: "a", content: "apple" },
-      { id: "b", content: "banana" },
-    ]);
-    expect(ids).toEqual([]);
-  });
-
-  it("三个中有两个相同时只标记后出现的", () => {
-    const ids = deduplicateMemories([
-      { id: "a", content: "x" },
-      { id: "b", content: "y" },
-      { id: "c", content: "x" },
-    ]);
-    expect(ids).toEqual(["c"]);
-  });
-
-  it("空数组返回空", () => {
-    expect(deduplicateMemories([])).toEqual([]);
-  });
-});
-
-describe("detectDuplicates", () => {
-  it("高词语重合不作为精确重复", () => {
-    // Jaccard ≈ 0.905: 19 公共 / 21 union (20 词 each, 1 diff)
-    const result = detectDuplicates("a b c d e f g h i j k l m n o p q r s u", [
-      "a b c d e f g h i j k l m n o p q r s t",
-    ]);
-    expect(result.isDuplicate).toBe(false);
-    expect(result.similarity).toBe(0);
-  });
-
-  it("完全不同内容不重复", () => {
-    const result = detectDuplicates("apple banana", ["zebra xylophone"]);
-    expect(result.isDuplicate).toBe(false);
-  });
-
-  it("existingContents 为空时不重复", () => {
-    const result = detectDuplicates("hello", []);
-    expect(result.isDuplicate).toBe(false);
-  });
-
-  it("保留符号后比较", () => {
-    const result = detectDuplicates("Hello, World!", ["hello world"]);
-    expect(result.isDuplicate).toBe(false);
-  });
-});
 
 // ═══════════════════════════════════════════════════════════════
 // Formatter

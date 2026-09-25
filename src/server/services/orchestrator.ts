@@ -76,7 +76,7 @@ export class Orchestrator {
   ): Promise<string> {
     // 1. 预处理：清洗 + 去重 + 拆包
     const formattedContent = formatMemoryContent(content);
-    const pipelineResult = await processJsonPipeline(formattedContent, []);
+    const pipelineResult = await processJsonPipeline(formattedContent);
 
     if (pipelineResult.chunks.length === 0) {
       throw new MemoryValidationError("content", "内容为空或经清洗后无效");

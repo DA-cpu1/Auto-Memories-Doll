@@ -127,4 +127,23 @@ export const apiRouteContracts: Record<string, ApiRouteContract> = {
     responseSchema: "studyGuideResponseSchema",
     errorCodes: ["VALIDATION_FAILED", "NOT_FOUND", "GUIDE_GENERATION_FAILED", "INTERNAL_ERROR"],
   },
+  "src/app/api/ask/route.ts": {
+    requestSchema: "askRequestSchema",
+    responseSchema: "askStreamResponseSchema",
+    errorCodes: ["INVALID_JSON", "VALIDATION_FAILED", "INTERNAL_ERROR"],
+  },
 };
+
+export const askRequestSchema = z.object({
+  question: z.string().trim().min(1, "问题不能为空").max(500, "问题最长 500 字符"),
+});
+
+export const askStatsResponseSchema = z.object({
+  stats: z.object({
+    totalAsks: z.number().int().nonnegative(),
+    refusedAsks: z.number().int().nonnegative(),
+    totalPromptTokens: z.number().int().nonnegative(),
+    totalCompletionTokens: z.number().int().nonnegative(),
+    lastAskedAt: z.string().nullable(),
+  }),
+});

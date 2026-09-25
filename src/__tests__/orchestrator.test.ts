@@ -4,8 +4,6 @@ import { MemoryRecord } from "../types/memory";
 // ── mock: processJsonPipeline ──
 const pipelineMock = vi.hoisted(() => ({
   pipelineResult: {
-    isDuplicate: false,
-    similarity: 0,
     chunks: [{ content: "cleaned content", summary: "pipe-summary", tags: ["pipe-tag"] }],
   },
 }));
@@ -282,8 +280,6 @@ describe("Orchestrator", () => {
     auditServiceStub = createAuditServiceStub();
     // 重置 pipeline mock
     pipelineMock.pipelineResult = {
-      isDuplicate: false,
-      similarity: 0,
       chunks: [{ content: "cleaned content", summary: "pipe-summary", tags: ["pipe-tag"] }],
     };
     builderMock.validatorResult = true;
@@ -355,8 +351,6 @@ describe("Orchestrator", () => {
     it("多 chunk 合并为 markdown 分段正文", async () => {
       memoryServiceStub.listMemories.mockReturnValue([]);
       pipelineMock.pipelineResult = {
-        isDuplicate: false,
-        similarity: 0,
         chunks: [
           { content: "part A", summary: "sum A", tags: [] },
           { content: "part B", summary: "sum B", tags: [] },
@@ -384,8 +378,6 @@ describe("Orchestrator", () => {
     it("pipeline 返回空 chunks 时抛出 MemoryValidationError", async () => {
       memoryServiceStub.listMemories.mockReturnValue([]);
       pipelineMock.pipelineResult = {
-        isDuplicate: false,
-        similarity: 0,
         chunks: [],
       };
 

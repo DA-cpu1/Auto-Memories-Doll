@@ -91,12 +91,14 @@ describe("LKA-001 Phase 5 product boundary", () => {
 
   it("replaces chat navigation with source, review, and retrieval entry points", () => {
     const homepage = source("src/app/(main)/page.tsx");
+    // 检索入口随提问面板拆到 AskPanel，按首页组合（page + AskPanel）校验
+    const homepageComposition = `${homepage}\n${source("src/components/ask/AskPanel.tsx")}`;
     const settings = source("src/components/settings/SettingsLayout.tsx");
 
     expect(homepage).toContain('href: "/settings/tools"');
     expect(homepage).not.toContain('href: "/audit"');
-    expect(homepage).toContain('href="/memory"');
-    expect(homepage).not.toMatch(/href[:=]\s*["']\/(?:chat|profile)/);
+    expect(homepageComposition).toContain('href="/memory"');
+    expect(homepageComposition).not.toMatch(/href[:=]\s*["']\/(?:chat|profile)/);
     expect(settings).not.toMatch(/settings\/(?:mcp|skills|profile|prompts)/);
   });
 

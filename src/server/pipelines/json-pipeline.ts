@@ -1,5 +1,4 @@
 import { splitText } from "./splitter";
-import { detectDuplicates } from "./deduplicator";
 import { formatMemoryContent, formatSummary } from "./formatter";
 
 export interface ProcessedChunk {
@@ -9,16 +8,12 @@ export interface ProcessedChunk {
   tags: string[];
 }
 
+// LKA-004 起跨来源精确去重已取消：相同来源由 sourceHash/revision 幂等保证，
+// 不同来源的相同正文允许各自保存（见 docs/specs/004-automatic-publishing/delivery.md）。
 export const processJsonPipeline = async (
   rawContent: string,
-  existingContents: string[] = [],
-): Promise<{ chunks: ProcessedChunk[]; isDuplicate: boolean; similarity: number }> => {
+): Promise<{ chunks: ProcessedChunk[] }> => {
   const formatted = formatMemoryContent(rawContent);
-
-  const duplicateCheck = detectDuplicates(formatted, existingContents);
-  if (duplicateCheck.isDuplicate) {
-    return { chunks: [], isDuplicate: true, similarity: duplicateCheck.similarity };
-  }
 
   const chunks = splitText(formatted);
   const processedChunks: ProcessedChunk[] = [];
@@ -32,7 +27,7 @@ export const processJsonPipeline = async (
     });
   }
 
-  return { chunks: processedChunks, isDuplicate: false, similarity: 0 };
+  return { chunks: processedChunks };
 };
 
 export const extractTags = (content: string): string[] => {

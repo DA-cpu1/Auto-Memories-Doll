@@ -2,22 +2,8 @@
 
 import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
-import type { FormEvent } from "react";
+import { AskPanel } from "@/components/ask/AskPanel";
 import type { CodexDialogueDiagnostics } from "@/types/codex-dialogue";
-import { useRouter } from "next/navigation";
-import { memoryDetailHref, searchMemoriesClient } from "@/lib/memory-api-client";
-
-type SearchResult = {
-  id: string;
-  title: string;
-  titleZh?: string;
-  summary: string;
-  summaryZh?: string;
-  topic: string;
-  score?: number;
-  source?: string;
-  channels?: string[];
-};
 
 type SourceStatus = {
   agent?: {
@@ -88,11 +74,6 @@ const DIALOGUE_LABELS: Record<CodexDialogueDiagnostics["reasons"][number], strin
 };
 
 export default function DashboardPage() {
-  const router = useRouter();
-  const [query, setQuery] = useState("");
-  const [results, setResults] = useState<SearchResult[]>([]);
-  const [searching, setSearching] = useState(false);
-  const [searched, setSearched] = useState(false);
   const [sourceStatus, setSourceStatus] = useState<SourceStatus | null>(null);
   const [queueStatus, setQueueStatus] = useState<QueueStatus | null>(null);
 
@@ -108,23 +89,6 @@ export default function DashboardPage() {
   useEffect(() => {
     loadStatus().catch(() => undefined);
   }, [loadStatus]);
-
-  const handleSearch = async (event: FormEvent<HTMLFormElement>) => {
-    event.preventDefault();
-    const value = query.trim();
-    if (!value) return;
-
-    setSearching(true);
-    setSearched(true);
-    try {
-      const response = await searchMemoriesClient(value, 8);
-      setResults(response.results);
-    } catch {
-      setResults([]);
-    } finally {
-      setSearching(false);
-    }
-  };
 
   const sourceCount = sourceStatus?.agent?.sources?.length ?? 0;
   const activeWatcherCount =
@@ -183,70 +147,7 @@ export default function DashboardPage() {
       </section>
 
       <div className="mt-6 grid grid-cols-1 gap-6 lg:grid-cols-[minmax(0,1.45fr)_minmax(280px,0.75fr)]">
-        <section className="rounded-lg border border-[#E0D6C7] bg-[#FFFDF9] p-5 sm:p-6">
-          <div className="mb-5 flex items-center justify-between gap-4">
-            <h2 className="text-base font-semibold text-[#3E3224]">快速检索</h2>
-            <Link href="/memory" className="text-sm font-medium text-[#8B6500] hover:underline">
-              打开检索库
-            </Link>
-          </div>
-          <form onSubmit={handleSearch} className="flex flex-col gap-2 sm:flex-row">
-            <label htmlFor="dashboard-search" className="sr-only">
-              检索知识
-            </label>
-            <input
-              id="dashboard-search"
-              value={query}
-              onChange={(event) => setQuery(event.target.value)}
-              placeholder="输入关键词或自然语言问题"
-              className="input min-w-0 flex-1"
-            />
-            <button type="submit" className="btn shrink-0" disabled={searching}>
-              {searching ? "检索中" : "检索"}
-            </button>
-          </form>
-
-          {searched ? (
-            <div className="mt-5 border-t border-[#ECE4D8] pt-4" aria-live="polite">
-              {results.length > 0 ? (
-                <ul className="divide-y divide-[#ECE4D8]">
-                  {results.map((result) => (
-                    <li key={result.id}>
-                      <button
-                        type="button"
-                        onClick={() => router.push(memoryDetailHref(result.id))}
-                        className="w-full py-3 text-left focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#A67C00]"
-                      >
-                        <div className="flex items-start justify-between gap-3">
-                          <span className="font-medium text-[#3E3224]">
-                            {result.titleZh || result.title}
-                          </span>
-                          <span className="shrink-0 font-mono text-xs text-[#8B7355]">
-                            {result.score === undefined
-                              ? result.topic
-                              : `${Math.round(result.score * 100)}%`}
-                          </span>
-                        </div>
-                        <p className="mt-1 line-clamp-2 text-sm text-[#6F604B]">
-                          {result.summaryZh || result.summary}
-                        </p>
-                        <p className="mt-2 flex flex-wrap gap-x-3 gap-y-1 text-xs text-[#8B7355]">
-                          <span>主题 {result.topic}</span>
-                          <span>来源 {result.source || "未知"}</span>
-                          {result.channels?.length ? (
-                            <span>命中 {result.channels.join(" + ")}</span>
-                          ) : null}
-                        </p>
-                      </button>
-                    </li>
-                  ))}
-                </ul>
-              ) : searching ? null : (
-                <p className="py-6 text-center text-sm text-[#8B7355]">未找到匹配知识</p>
-              )}
-            </div>
-          ) : null}
-        </section>
+        <AskPanel />
 
         <aside className="rounded-lg border border-[#E0D6C7] bg-[#FFFDF9] p-5 sm:p-6">
           <div className="mb-4 flex items-center justify-between gap-4">
