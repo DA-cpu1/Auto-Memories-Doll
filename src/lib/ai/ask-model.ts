@@ -1,5 +1,11 @@
 import { generateText, stepCountIs, streamText, tool, type ToolSet } from "ai";
-import { ASK_MAX_STEPS, ASK_MODEL_TYPE, ASK_TIMEOUT_MS } from "../../config/ask.config";
+import {
+  ASK_MAX_STEPS,
+  ASK_MODEL_TYPE,
+  ASK_REPAIR_MAX_CANDIDATES,
+  ASK_REPAIR_MEMORY_CHARS,
+  ASK_TIMEOUT_MS,
+} from "../../config/ask.config";
 import { AskLoopMode, AskToolTraceEntry, AskUsage } from "../../types/ask";
 import { parseModelObject } from "./model-json";
 import { createLanguageModel } from "./provider";
@@ -338,4 +344,60 @@ function toAskUsage(usage: { inputTokens?: number; outputTokens?: number } | und
     promptTokens: usage?.inputTokens ?? 0,
     completionTokens: usage?.outputTokens ?? 0,
   };
+}
+
+/**
+ * 引用自修正：答案已生成但引用区块缺失/转录失准时，把被引候选记忆的原文
+ * 注入上下文，要求模型只重写引用区块（不重写答案正文）。单次调用、无工具、
+ * 输出仍走同一套逐字校验——修正失败则维持拒答，不放宽闸门。
+ */
+export type CitationRepairInput = {
+  question: string;
+  answerText: string;
+  /** 人类可读的失败原因（协议缺失/转录失准等） */
+  reason: string;
+  candidates: { memoryId: string; title: string; content: string }[];
+  signal?: AbortSignal;
+};
+
+export async function repairCitations(
+  input: CitationRepairInput,
+): Promise<{ text: string; usage: AskUsage }> {
+  const memories = input.candidates.slice(0, ASK_REPAIR_MAX_CANDIDATES).map((memory) => ({
+    memoryId: memory.memoryId,
+    content:
+      memory.content.length > ASK_REPAIR_MEMORY_CHARS
+        ? `${memory.content.slice(0, ASK_REPAIR_MEMORY_CHARS)}…`
+        : memory.content,
+  }));
+
+  const prompt = `问题：${input.question}
+
+你此前生成的答案：
+${input.answerText.slice(0, 4000)}
+
+该答案的引用区块未通过程序化逐字校验。
+失败原因：${input.reason}
+
+候选记忆原文（quote 只能从这里逐字复制，保持原文语言、标点与全半角）：
+<memories>
+${JSON.stringify(memories, null, 1)}
+</memories>
+
+请只输出修正后的引用区块，不要输出任何其他文字，格式严格为：
+<citations>
+[{"memoryId": "记忆ID", "quote": "原文逐字片段"}]
+</citations>
+要求：quote 与候选原文逐字一致（含全半角标点），宁短勿改写、勿拼接；每条支撑性结论都要有引用。若候选原文确实无法支撑该答案，输出 []。`;
+
+  const result = await generateText({
+    model: createLanguageModel(ASK_MODEL_TYPE),
+    system:
+      "你是引用修正器。你的唯一任务是依据给定原文重写引用区块，quote 必须逐字复制原文，绝不改写、翻译或概括。",
+    prompt,
+    abortSignal: input.signal,
+    timeout: ASK_TIMEOUT_MS,
+  });
+
+  return { text: result.text ?? "", usage: toAskUsage(result.usage) };
 }

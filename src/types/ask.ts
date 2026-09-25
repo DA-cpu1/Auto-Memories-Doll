@@ -36,6 +36,9 @@ export type AskDiagnostics = {
   /** 拒答时模型的原始输出（已截断），用于排查引用区块与转录质量 */
   rawAnswer?: string;
   rawCitations?: { memoryId: string; quote: string }[];
+  /** 引用自修正是否尝试过/是否成功 */
+  repairAttempted?: boolean;
+  repairSucceeded?: boolean;
 };
 
 /** ask_logs 表的规范记录形态（JSON 列已反序列化） */

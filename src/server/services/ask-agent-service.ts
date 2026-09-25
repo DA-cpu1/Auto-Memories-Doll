@@ -7,8 +7,8 @@ import {
   AskToolTraceEntry,
   AskUsage,
 } from "../../types/ask";
-import { getAskModelId, runAskLoop } from "../../lib/ai/ask-model";
-import { AskToolkit, AskToolkitDeps } from "./ask-tools";
+import { getAskModelId, repairCitations, runAskLoop } from "../../lib/ai/ask-model";
+import { ASK_TOOL_NAMES, AskToolkit, AskToolkitDeps } from "./ask-tools";
 import { AskLogService } from "./ask-log-service";
 
 /**
@@ -220,8 +220,72 @@ export class AskAgentService {
         signal: controller.signal,
       });
 
-      const parsed = splitAnswerAndCitations(loopResult.answerText);
-      const verification = verifyCitations(parsed.citations, this.toolkit);
+      let parsed = splitAnswerAndCitations(loopResult.answerText);
+      let verification = verifyCitations(parsed.citations, this.toolkit);
+      let usage: AskUsage = { ...loopResult.usage };
+      let repairAttempted = false;
+      let repairSucceeded = false;
+
+      // 引用自修正（单次）：答案已生成且模型声明过引用（或漏了引用区块）、
+      // 且确实读取过记忆时，把失败原因与候选原文喂回模型只重写引用区块。
+      // 模型明确声明"无依据"（空 [] 且无协议错误）时不重试——那是真实拒答。
+      const readMemoryIds = collectReadMemoryIds(loopResult.toolTrace);
+      const citationsDeclared = parsed.parseError !== undefined || parsed.citations.length > 0;
+      if (
+        !verification.valid &&
+        parsed.answer.length > 0 &&
+        citationsDeclared &&
+        readMemoryIds.length > 0
+      ) {
+        repairAttempted = true;
+        onEvent?.({
+          type: "tool_call",
+          tool: "citation_repair",
+          args: { reason: parsed.parseError || verification.failureReason },
+        });
+        // 修正阶段独立重置超时预算：主循环已完成，原计时器不应掐断修正调用
+        clearTimeout(timeout);
+        const repairTimer = setTimeout(() => controller.abort(), ASK_TIMEOUT_MS);
+        try {
+          const candidates = this.toolkit
+            .readMemoriesForVerification([
+              ...new Set([...readMemoryIds, ...parsed.citations.map((c) => c.memoryId)]),
+            ])
+            .map((memory) => ({
+              memoryId: memory.id,
+              title: memory.titleZh || memory.title,
+              content: memory.content,
+            }));
+          const repair = await repairCitations({
+            question,
+            answerText: loopResult.answerText,
+            reason: describeVerificationFailure(parsed.parseError, verification.failureReason),
+            candidates,
+            signal: controller.signal,
+          });
+          usage = {
+            promptTokens: usage.promptTokens + repair.usage.promptTokens,
+            completionTokens: usage.completionTokens + repair.usage.completionTokens,
+          };
+
+          const reparsed = splitAnswerAndCitations(repair.text);
+          const reverification = verifyCitations(reparsed.citations, this.toolkit);
+          if (reverification.valid) {
+            parsed = { answer: parsed.answer, citations: reparsed.citations };
+            verification = reverification;
+            repairSucceeded = true;
+          }
+        } catch {
+          // 修正调用失败：按原校验结果拒答，不放宽闸门
+        } finally {
+          clearTimeout(repairTimer);
+        }
+        onEvent?.({
+          type: "tool_result",
+          tool: "citation_repair",
+          resultSummary: repairSucceeded ? "引用已修正" : "修正未通过校验",
+        });
+      }
 
       const durationMs = Date.now() - startedAt;
       const model = getAskModelId();
@@ -231,7 +295,7 @@ export class AskAgentService {
             askId: "",
             answer: parsed.answer,
             citations: verification.citations,
-            usage: loopResult.usage,
+            usage,
             toolTrace: loopResult.toolTrace,
             model,
             mode: loopResult.mode,
@@ -247,7 +311,7 @@ export class AskAgentService {
               parsed.parseError,
             ),
             citations: [],
-            usage: loopResult.usage,
+            usage,
             toolTrace: loopResult.toolTrace,
             model,
             mode: loopResult.mode,
@@ -264,8 +328,16 @@ export class AskAgentService {
         model,
         mode: outcome.mode,
         durationMs,
-        diagnostics:
-          outcome.kind === "refused"
+        diagnostics: repairAttempted
+          ? {
+              parseError: parsed.parseError,
+              failureReason: verification.failureReason,
+              rawAnswer: parsed.answer.slice(0, 2000) || loopResult.answerText.slice(0, 2000),
+              rawCitations: parsed.citations,
+              repairAttempted,
+              repairSucceeded,
+            }
+          : outcome.kind === "refused"
             ? {
                 parseError: parsed.parseError,
                 failureReason: verification.failureReason,
@@ -318,6 +390,35 @@ export class AskAgentService {
  * 拒答时的建议文案：模型按协议明确说明缺口时复用其描述；
  * 协议缺失（无区块/JSON 损坏）时答案未经任何引用约束，不作为建议展示。
  */
+/** 从工具轨迹收集模型实际读取过的记忆 id（引用自修正的候选来源） */
+function collectReadMemoryIds(toolTrace: AskToolTraceEntry[]): string[] {
+  const ids: string[] = [];
+  for (const entry of toolTrace) {
+    if (entry.tool !== ASK_TOOL_NAMES.readMemory) continue;
+    const memoryId = entry.args?.memoryId;
+    if (typeof memoryId === "string" && memoryId.length > 0 && !ids.includes(memoryId)) {
+      ids.push(memoryId);
+    }
+  }
+  return ids;
+}
+
+/** 把程序化失败码翻译给模型听，指导它修正什么 */
+function describeVerificationFailure(parseError?: string, failureReason?: string): string {
+  if (parseError === "missing-citations-block") return "答案末尾缺少 <citations> 引用区块";
+  if (parseError === "citations-invalid-json") return "引用区块不是合法 JSON";
+  if (parseError === "citations-not-array") return "引用区块内容不是数组";
+  if (failureReason === "no-citations") return "引用区块为空";
+  if (failureReason?.startsWith("memory-not-found:")) {
+    return `引用了不存在的记忆（${failureReason.slice("memory-not-found:".length)}）`;
+  }
+  if (failureReason?.startsWith("quote-too-short:")) return "某条 quote 过短（至少 6 字符）";
+  if (failureReason?.startsWith("quote-not-in-memory:")) {
+    return `某条 quote 不是所引记忆原文的逐字片段（${failureReason.slice("quote-not-in-memory:".length)}），请从候选原文重新逐字复制`;
+  }
+  return "引用未通过逐字校验";
+}
+
 function buildSuggestion(modelAnswer: string, failureReason?: string, parseError?: string): string {
   const protocolBroken =
     parseError === "missing-citations-block" ||

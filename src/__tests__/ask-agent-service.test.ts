@@ -361,4 +361,107 @@ describe("AskAgentService.ask", () => {
     );
     expect(aiMocks.generateText).not.toHaveBeenCalled();
   });
+
+  // ── 引用自修正 ──
+
+  /** 模拟真实 SDK：流式中途执行 read_memory 工具（写入 trace），再流出带瑕疵引用的答案 */
+  function streamWithToolTrace(answer: string) {
+    return (config: {
+      tools: Record<string, { execute: (input: unknown) => Promise<unknown> }>;
+    }) => {
+      const exec = config.tools.read_memory.execute({ memoryId: "mem-1" });
+      return {
+        fullStream: (async function* () {
+          await exec;
+          yield { type: "tool-call" };
+          yield { type: "text-delta", text: answer };
+        })(),
+        usage: Promise.resolve({ inputTokens: 100, outputTokens: 40 }),
+        finishReason: Promise.resolve("stop"),
+      };
+    };
+  }
+
+  it("引用转录失准且读取过记忆时，自修正成功则以修正后引用作答", async () => {
+    aiMocks.streamText.mockImplementation(
+      streamWithToolTrace(
+        '项目使用 USearch HNSW。\n<citations>\n[{"memoryId": "mem-1", "quote": "引用不逐字的改写片段"}]\n</citations>',
+      ),
+    );
+    aiMocks.generateText.mockResolvedValue(
+      makeTextResult(
+        '<citations>\n[{"memoryId": "mem-1", "quote": "USearch HNSW ANN 索引"}]\n</citations>',
+      ),
+    );
+
+    const events: string[] = [];
+    const outcome = await buildService([buildMem()]).ask({
+      question: "项目用什么向量索引？",
+      onEvent: (event) => events.push(event.type),
+    });
+
+    expect(outcome.kind).toBe("answered");
+    if (outcome.kind !== "answered") return;
+    expect(outcome.citations[0].verified).toBe(true);
+    expect(outcome.citations[0].quote).toBe("USearch HNSW ANN 索引");
+    // 修正消耗并入总 usage
+    expect(outcome.usage.promptTokens).toBe(180);
+    expect(events).toEqual([
+      "tool_call",
+      "tool_result",
+      "token",
+      "tool_call",
+      "tool_result",
+      "citations",
+      "done",
+    ]);
+
+    const log = new AskLogService().listRecent(1)[0];
+    expect(log.refused).toBe(false);
+    expect(log.diagnostics?.repairAttempted).toBe(true);
+    expect(log.diagnostics?.repairSucceeded).toBe(true);
+  });
+
+  it("自修正仍未通过校验时维持拒答并记录修正失败", async () => {
+    aiMocks.streamText.mockImplementation(
+      streamWithToolTrace(
+        '答案。\n<citations>\n[{"memoryId": "mem-1", "quote": "还是不逐字"}]\n</citations>',
+      ),
+    );
+    aiMocks.generateText.mockResolvedValue(
+      makeTextResult('<citations>\n[{"memoryId": "mem-1", "quote": "修正也失败"}]\n</citations>'),
+    );
+
+    const events: string[] = [];
+    const outcome = await buildService([buildMem()]).ask({
+      question: "项目用什么向量索引？",
+      onEvent: (event) => events.push(event.type),
+    });
+
+    expect(outcome.kind).toBe("refused");
+    expect(events).toContain("refusal");
+    expect(events).toContain("tool_result");
+
+    const log = new AskLogService().listRecent(1)[0];
+    expect(log.refused).toBe(true);
+    expect(log.diagnostics?.repairAttempted).toBe(true);
+    expect(log.diagnostics?.repairSucceeded).toBe(false);
+  });
+
+  it("模型明确声明无依据（空引用且无协议错误）时不触发自修正", async () => {
+    aiMocks.streamText.mockImplementation(
+      streamWithToolTrace("库内未找到依据：没有相关记录。\n<citations>[]</citations>"),
+    );
+
+    const events: string[] = [];
+    const outcome = await buildService([buildMem()]).ask({
+      question: "别的主题？",
+      onEvent: (event) => events.push(event.type),
+    });
+
+    expect(outcome.kind).toBe("refused");
+    // 只有 read_memory 一次工具事件，没有 citation_repair 触发（tool_call 总数为 1）
+    expect(events.filter((type) => type === "tool_call")).toHaveLength(1);
+    expect(aiMocks.generateText).not.toHaveBeenCalled();
+  });
 });

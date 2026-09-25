@@ -366,8 +366,9 @@ KnowledgeAgent 不依赖 React 或 Next.js Route Handler，也不提供通用聊
 2. `AskAgentService.ask()` 调用 `runAskLoop()`（`src/lib/ai/ask-model.ts`）：standard 档模型 + `streamText` 原生工具循环，`stopWhen: stepCountIs(6)`，整链路超时 120s（`ASK_TIMEOUT_MS`）
 3. 模型在循环内调用四个只读取证工具（`src/server/services/ask-tools.ts`）：`search_memory`（语义检索，embedding 不可用自动退关键词）、`read_memory`（读记忆全文，引用片段的合法来源）、`read_source_document`（按 sourceId 读原始来源文件，超 8000 字截断）、`read_topic_guide`（主题学习资料大纲与章节）
 4. 模型答案末尾必须附 `<citations>[{memoryId, quote}]</citations>` 引用区块；`splitAnswerAndCitations` 解析（多区块取最后一个，正文示例不干扰）
-5. **引用校验硬闸门**（`verifyCitations`）：每个 memoryId 必须真实存在，quote 去空白小写归一化后必须是被引记忆 content/summary/title 的子串，且长度 ≥ 6 字符。零引用或任何一条失败 → 严格拒答（不展示未验证答案），拒答附原因与建议（模型按协议描述缺口时复用其描述）
-6. 每次问答落库 `ask_logs` 表（`src/server/services/ask-log-service.ts`）：question、answer、refused、citations、toolTrace、token 用量、model、mode、durationMs、createdAt；`GET /api/ask` 与首页展示累计 token 统计
+5. **引用校验硬闸门**（`verifyCitations`）：每个 memoryId 必须真实存在，quote 去空白小写归一化后必须是被引记忆 content/summary/title 的子串，且长度 ≥ 6 字符（归一化含全半角标点折叠）。零引用或任何一条失败 → 严格拒答（不展示未验证答案），拒答附原因与建议（模型按协议描述缺口时复用其描述）
+6. **引用自修正**（单次，`repairCitations`）：校验失败且答案非空、模型声明过引用（或漏了引用区块）、且确实 `read_memory` 读取过记忆时，把失败原因与候选记忆原文注入上下文，要求模型只重写引用区块（不重写答案正文）；修正结果仍走同一套逐字校验，失败则维持拒答——闸门不放宽。模型明确声明"无依据"（空 `[]` 且无协议错误）时不触发修正。修正阶段独立重置 120s 超时预算并透传 abort 信号；`citation_repair` 以 tool_call/tool_result 事件形式在前端可见；消耗并入总 usage，诊断字段记录 `repairAttempted`/`repairSucceeded`
+7. 每次问答落库 `ask_logs` 表（`src/server/services/ask-log-service.ts`）：question、answer、refused、citations、toolTrace、token 用量、model、mode、durationMs、diagnostics（拒答原因/原始输出/修正记录，旧库自动补列）、createdAt；`GET /api/ask` 与首页展示累计 token 统计
 
 **降级链**（`runAskLoop` 内）：流式工具循环 →（失败前无任何 token/工具活动时）非流式 `generateText` 缓冲循环 →（tools 参数不被端点支持时）JSON 手工循环（ReAct 式：模型每轮输出 `{"action":{tool,args}}` 或 `{"final":答案}`，`parseModelObject` 剥 `<think>` 后解析）。实际执行模式以 `mode` 字段落库（stream/buffered/json-loop）。一旦循环已产出 token 或执行过工具，不再降级，直接报错——避免重复执行副作用与重复计费。
 
@@ -1100,5 +1101,6 @@ Phase 8 — 验证和作品集交付
 - [x] 清理：删除 `deduplicator.ts`（LKA-004 下精确去重为设计如此，`processJsonPipeline` 死参数移除）与六个空脚手架目录；死代码审计 159 个生产模块可达。
 - [x] 门禁：493 条单元/集成测试、7 条 Playwright E2E、生产构建、typecheck/lint/format/eval 通过；`phase-5-scope-removal` 产品边界测试改为按首页组合（page + AskPanel）校验检索入口。
 - [x] 实测（2026-09-25，glm-4.7 @ open.bigmodel.cn 官方端点）：原生 streamText+tools 全链路通过。首问暴露引用校验器对全半角标点变体过严（模型引对卡但标点折叠缺失被误拒），修复 `normalizeForCitation` 全半角折叠后二问通过（4 条引用全 verified，5,606 入/1,450 出 token，47s，mode=stream）。两级降级路径保留作为换提供商兜底（见 11.1 偏差表）。
-- [x] 实测续修（同日）：复杂问题三连拒定位出三种失败模式并修复两种——①步数耗尽空答案（模型用满 6 步工具未作答）→ `ASK_MAX_STEPS` 提至 8 + `prepareStep` 末步 `toolChoice:"none"` 强制作答 + 提示词加工具预算；②引用转录笔误（模型抄写原文时打错字，如 ALIYYUN 双写）→ 严格模式按设计拒绝，属模型行为非缺陷。已知边界：贴线引用的转录错误会导致有依据的问题被拒，换问法或重问即可；后续可选增强为拒答前单次自我修正重试。
+- [x] 实测续修（同日）：复杂问题三连拒定位出三种失败模式并修复两种——①步数耗尽空答案（模型用满 6 步工具未作答）→ `ASK_MAX_STEPS` 提至 8 + `prepareStep` 末步 `toolChoice:"none"` 强制作答 + 提示词加工具预算；②引用转录笔误（模型抄写原文时打错字，如 ALIYYUN 双写）→ 严格模式按设计拒绝，属模型行为非缺陷。
+- [x] 引用自修正交付（同日，用户首次真实使用撞上拒答后）：校验失败时把失败原因 + 候选记忆原文喂回模型单次重写引用区块，修正结果仍走同一套逐字校验，不放宽闸门；模型明确声明无依据时不触发。前端 token 渲染改为 120ms 批量刷新（此前逐 token setState 打满主线程，用户体感"抢鼠标"）；`ask_logs` 增 `diagnostics` 列记录拒答原因/原始输出/修正结果。顽固问题（此前三连拒）重测通过：6 工具 + 1 次修正，10 条引用全 verified，15,504/4,997 token，144s。
 - [x] 运维决策（2026-09-25）：清除 922 条积压全量重建任务（用户决定不跑，清单备份 `memory-root/archive/cleared-rebuild-tasks-2026-09-25.json`，可随时经"全量扫描重建"重新生成）；实测重建任务走 flagship 档、922 条约 150 万入/120 万出 token。已知未处理：`VectorScheduler` 每小时全量重嵌入 966 张卡（约 ¥36/月 embedding 费，无增量过滤），待用户决定是否增量化。

@@ -25,6 +25,10 @@ export const ASK_MODEL_TYPE: ModelType = "standard";
 /** 引用片段归一化比对的最小长度：过短的引用（如单字）无溯源意义 */
 export const ASK_CITATION_MIN_QUOTE_LENGTH = 6;
 
+/** 引用自修正：最多注入候选记忆数与单条记忆正文截断长度（防 prompt 膨胀） */
+export const ASK_REPAIR_MAX_CANDIDATES = 6;
+export const ASK_REPAIR_MEMORY_CHARS = 3000;
+
 /** read_source_document 单次注入上下文的正文上限（字符），超出截断并标注 */
 export const ASK_SOURCE_MAX_CHARS = 8000;
 
