@@ -1,7 +1,10 @@
 import type { ModelType } from "../lib/ai/knowledge-model";
 
-/** 工具循环最大步数：search → read → 再检索 → 生成引用，6 步覆盖常见问题 */
-export const ASK_MAX_STEPS = 6;
+/**
+ * 工具循环最大步数。8 = 留余量的 5-6 次工具调用 + 最终作答步：
+ * 实测 glm-4.7 在复杂问题上会用满 6 步工具，若上限贴着工具数会掐掉答案步。
+ */
+export const ASK_MAX_STEPS = 8;
 
 /**
  * 单次问答整链路超时。问答走多步工具循环，明显高于单次 generate

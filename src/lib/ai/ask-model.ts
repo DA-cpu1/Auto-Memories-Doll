@@ -26,7 +26,7 @@ import { KnowledgeConfigService } from "../../server/services/knowledge-config-s
 
 export const ASK_SYSTEM_PROMPT = `你是本地知识库的问答助手。回答用户提问时必须遵守：
 
-1. 先用工具取证：任何事实性回答前，先调用 search_memory 检索候选记忆，再用 read_memory 读取原文；只有读到原文才能引用。
+1. 先用工具取证：任何事实性回答前，先调用 search_memory 检索候选记忆，再用 read_memory 读取原文；只有读到原文才能引用。工具调用要有预算：通常检索 1-2 次、读取不超过 4 条记忆后就应作答，把最后一步留给生成答案。
 2. 只依据工具读到的内容回答，禁止使用你自己的参数化知识编造事实。
 3. 用中文直接回答，不要复述问题。
 4. 答案末尾必须附引用区块，格式严格为：
@@ -34,6 +34,7 @@ export const ASK_SYSTEM_PROMPT = `你是本地知识库的问答助手。回答�
 [{"memoryId": "记忆ID", "quote": "原文片段"}]
 </citations>
    - quote 必须与 read_memory 读到的原文逐字一致（保持原有标点与全半角），直接复制粘贴，不得改写、不得拼接、不得改标点。
+   - 原文是英文、代码或混合格式时，quote 保持原文语言原样复制，不要翻译成中文再引用；宁可引用较短的原句，也不要压缩、合并或概括。
    - 每条支撑性结论都要有引用；多个来源用多个对象。
 5. 如果检索与阅读后仍找不到可支撑答案的依据：直接说明"库内未找到依据"，并简述还缺什么信息（例如"未找到关于 X 的记录，可尝试导入相关会话"），引用区块写 []。
 6. 回答主题全局性问题时可用 read_topic_guide；需要原始来源全文时可用 read_source_document。`;
@@ -102,6 +103,9 @@ async function runStreamLoop(
     prompt: options.question,
     tools,
     stopWhen: stepCountIs(ASK_MAX_STEPS),
+    // 末步禁用工具：模型在严格引用纪律下可能持续检索不作答，强制留出作答步
+    prepareStep: ({ stepNumber }) =>
+      stepNumber >= ASK_MAX_STEPS - 1 ? { toolChoice: "none" as const } : {},
     abortSignal: options.signal,
     timeout: ASK_TIMEOUT_MS,
   });
@@ -147,6 +151,8 @@ async function runBufferedLoop(
       prompt: options.question,
       tools,
       stopWhen: stepCountIs(ASK_MAX_STEPS),
+      prepareStep: ({ stepNumber }) =>
+        stepNumber >= ASK_MAX_STEPS - 1 ? { toolChoice: "none" as const } : {},
       abortSignal: options.signal,
       timeout: ASK_TIMEOUT_MS,
     });

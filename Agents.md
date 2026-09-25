@@ -1100,4 +1100,5 @@ Phase 8 — 验证和作品集交付
 - [x] 清理：删除 `deduplicator.ts`（LKA-004 下精确去重为设计如此，`processJsonPipeline` 死参数移除）与六个空脚手架目录；死代码审计 159 个生产模块可达。
 - [x] 门禁：493 条单元/集成测试、7 条 Playwright E2E、生产构建、typecheck/lint/format/eval 通过；`phase-5-scope-removal` 产品边界测试改为按首页组合（page + AskPanel）校验检索入口。
 - [x] 实测（2026-09-25，glm-4.7 @ open.bigmodel.cn 官方端点）：原生 streamText+tools 全链路通过。首问暴露引用校验器对全半角标点变体过严（模型引对卡但标点折叠缺失被误拒），修复 `normalizeForCitation` 全半角折叠后二问通过（4 条引用全 verified，5,606 入/1,450 出 token，47s，mode=stream）。两级降级路径保留作为换提供商兜底（见 11.1 偏差表）。
+- [x] 实测续修（同日）：复杂问题三连拒定位出三种失败模式并修复两种——①步数耗尽空答案（模型用满 6 步工具未作答）→ `ASK_MAX_STEPS` 提至 8 + `prepareStep` 末步 `toolChoice:"none"` 强制作答 + 提示词加工具预算；②引用转录笔误（模型抄写原文时打错字，如 ALIYYUN 双写）→ 严格模式按设计拒绝，属模型行为非缺陷。已知边界：贴线引用的转录错误会导致有依据的问题被拒，换问法或重问即可；后续可选增强为拒答前单次自我修正重试。
 - [x] 运维决策（2026-09-25）：清除 922 条积压全量重建任务（用户决定不跑，清单备份 `memory-root/archive/cleared-rebuild-tasks-2026-09-25.json`，可随时经"全量扫描重建"重新生成）；实测重建任务走 flagship 档、922 条约 150 万入/120 万出 token。已知未处理：`VectorScheduler` 每小时全量重嵌入 966 张卡（约 ¥36/月 embedding 费，无增量过滤），待用户决定是否增量化。
