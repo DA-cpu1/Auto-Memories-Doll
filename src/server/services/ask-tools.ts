@@ -105,6 +105,14 @@ export type AskToolkitDeps = {
   guideReader?: GuideReaderLike;
 };
 
+/**
+ * 进程级共享检索器：VectorIndex 首次实例化会从 SQLite 同步重建 HNSW
+ * （966 条 × 1024 维，实测打满一个核），按请求新建会让每次提问都触发
+ * 重建并造成系统级卡顿。后端带版本失配自动重建，共享是安全的；
+ * 索引随 SQLite 真源演进，无需显式失效。
+ */
+const sharedRetriever: RetrieverLike = new VectorRetriever();
+
 export class AskToolkit {
   private readonly retriever: RetrieverLike;
   private readonly memoryService: MemoryServiceLike;
@@ -112,7 +120,7 @@ export class AskToolkit {
   private readonly guideReader: GuideReaderLike;
 
   constructor(deps: AskToolkitDeps = {}) {
-    this.retriever = deps.retriever ?? new VectorRetriever();
+    this.retriever = deps.retriever ?? sharedRetriever;
     this.memoryService = deps.memoryService ?? new MemoryService();
     this.sourceRegistry = deps.sourceRegistry ?? new SourceRegistry();
     this.guideReader = deps.guideReader ?? new StudyGuideBuilder();
