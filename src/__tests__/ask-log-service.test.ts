@@ -23,6 +23,7 @@ function buildRecord(
     model: "test-model",
     mode: "stream",
     durationMs: 1500,
+    diagnostics: { failureReason: "no-citations", rawAnswer: "原始答案片段" },
     ...overrides,
   };
 }

@@ -256,6 +256,9 @@ describe("AskAgentService.ask", () => {
     const log = new AskLogService().listRecent(1)[0];
     expect(log.refused).toBe(true);
     expect(log.citations).toEqual([]);
+    expect(log.diagnostics?.failureReason).toBe("quote-not-in-memory:mem-1");
+    expect(log.diagnostics?.rawAnswer).toContain("Milvus");
+    expect(log.diagnostics?.rawCitations?.[0].memoryId).toBe("mem-1");
   });
 
   it("零引用（模型明确说没依据）拒答并使用模型描述作为建议", async () => {

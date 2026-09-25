@@ -80,6 +80,19 @@ export function AskPanel() {
 
     resetAskState();
     setPhase("running");
+
+    // token 事件频率可达 40+/秒，逐条 setState 会打满主线程（忙碌光标狂闪、
+    // 内容在鼠标下重排）。先攒进 ref，按固定间隔批量刷进 state。
+    let pendingTokens = "";
+    const flushTokens = () => {
+      if (pendingTokens.length > 0) {
+        const chunk = pendingTokens;
+        pendingTokens = "";
+        setAnswerText((text) => text + chunk);
+      }
+    };
+    const flushTimer = setInterval(flushTokens, 120);
+
     try {
       await askQuestionStream(question, {
         signal: controller.signal,
@@ -101,14 +114,15 @@ export function AskPanel() {
               });
               break;
             case "token":
-              setAnswerText((text) => text + event.text);
+              pendingTokens += event.text;
               break;
             case "citations":
               setCitations(event.citations);
               setPhase("answered");
               break;
             case "refusal":
-              // 严格拒答：已流出的答案不再展示
+              // 严格拒答：已流出与未刷出的答案都不再展示
+              pendingTokens = "";
               setAnswerText("");
               setRefusal({ reason: event.reason, suggestion: event.suggestion });
               setPhase("refused");
@@ -134,6 +148,9 @@ export function AskPanel() {
       setAskError(error instanceof Error ? error.message : String(error));
       setPhase("error");
     } finally {
+      clearInterval(flushTimer);
+      // 拒答分支已清空缓冲，这里只补齐正常结束时的尾段
+      flushTokens();
       // 流结束但未收到终态事件时解除按钮锁定
       setPhase((current) => (current === "running" ? "idle" : current));
     }

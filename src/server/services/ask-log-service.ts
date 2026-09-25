@@ -16,6 +16,7 @@ type AskLogRow = {
   mode: string;
   durationMs: number;
   createdAt: string;
+  diagnostics: string;
 };
 
 export class AskLogService {
@@ -38,6 +39,7 @@ export class AskLogService {
       model: input.model,
       mode: input.mode,
       durationMs: input.durationMs,
+      diagnostics: input.diagnostics,
       createdAt: new Date().toISOString(),
     };
 
@@ -46,8 +48,8 @@ export class AskLogService {
         `
         INSERT INTO ask_logs (
           askId, question, answer, refused, citations, toolTrace,
-          promptTokens, completionTokens, model, mode, durationMs, createdAt
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          promptTokens, completionTokens, model, mode, durationMs, diagnostics, createdAt
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `,
       )
       .run(
@@ -62,6 +64,7 @@ export class AskLogService {
         record.model,
         record.mode,
         record.durationMs,
+        JSON.stringify(record.diagnostics ?? {}),
         record.createdAt,
       );
 
@@ -123,11 +126,19 @@ export class AskLogService {
         model TEXT NOT NULL,
         mode TEXT NOT NULL DEFAULT 'stream',
         durationMs INTEGER NOT NULL DEFAULT 0,
+        diagnostics TEXT NOT NULL DEFAULT '{}',
         createdAt TEXT NOT NULL
       );
 
       CREATE INDEX IF NOT EXISTS idx_ask_logs_created_at ON ask_logs(createdAt);
     `);
+
+    // 旧库补列：diagnostics 为拒答排查新增
+    try {
+      this.db.exec("ALTER TABLE ask_logs ADD COLUMN diagnostics TEXT NOT NULL DEFAULT '{}'");
+    } catch {
+      // 列已存在
+    }
   }
 }
 
@@ -147,7 +158,17 @@ function toRecord(row: AskLogRow): AskLogRecord {
     mode: (row.mode as AskLoopMode) || "stream",
     durationMs: row.durationMs,
     createdAt: row.createdAt,
+    diagnostics: parseDiagnostics(row.diagnostics),
   };
+}
+
+function parseDiagnostics(raw: string): AskLogRecord["diagnostics"] {
+  try {
+    const parsed = JSON.parse(raw) as AskLogRecord["diagnostics"];
+    return parsed && typeof parsed === "object" ? parsed : {};
+  } catch {
+    return {};
+  }
 }
 
 function parseJsonArray<T>(raw: string): T[] {

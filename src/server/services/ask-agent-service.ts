@@ -264,6 +264,15 @@ export class AskAgentService {
         model,
         mode: outcome.mode,
         durationMs,
+        diagnostics:
+          outcome.kind === "refused"
+            ? {
+                parseError: parsed.parseError,
+                failureReason: verification.failureReason,
+                rawAnswer: parsed.answer.slice(0, 2000) || loopResult.answerText.slice(0, 2000),
+                rawCitations: parsed.citations,
+              }
+            : undefined,
       });
 
       const finalOutcome = { ...outcome, askId: record.askId } as AskOutcome;

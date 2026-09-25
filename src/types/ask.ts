@@ -29,6 +29,15 @@ export type AskUsage = {
 /** 本次问答实际执行的循环模式：原生流式 / 非流式缓冲 / JSON 手工循环（降级） */
 export type AskLoopMode = "stream" | "buffered" | "json-loop";
 
+/** 拒答诊断：为什么拒（协议缺失/校验失败）+ 模型原始输出，供事后排查 */
+export type AskDiagnostics = {
+  parseError?: string;
+  failureReason?: string;
+  /** 拒答时模型的原始输出（已截断），用于排查引用区块与转录质量 */
+  rawAnswer?: string;
+  rawCitations?: { memoryId: string; quote: string }[];
+};
+
 /** ask_logs 表的规范记录形态（JSON 列已反序列化） */
 export type AskLogRecord = {
   askId: string;
@@ -43,6 +52,7 @@ export type AskLogRecord = {
   mode: AskLoopMode;
   durationMs: number;
   createdAt: string;
+  diagnostics?: AskDiagnostics;
 };
 
 /** GET /api/ask 返回的累计统计（token 成本可见性承诺） */
