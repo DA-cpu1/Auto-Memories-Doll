@@ -149,6 +149,26 @@ describe("verifyCitations", () => {
     expect(result.citations[0].verified).toBe(true);
   });
 
+  it("全半角标点变体的引用通过校验（编码变体不算改写）", () => {
+    const toolkit = stubToolkit([
+      buildMem({
+        content: "时间：2026-09-08 18:30:52至18:31:15（实例ID：3ab6838），未收到回调。",
+      }),
+    ]);
+    const result = verifyCitations(
+      [
+        {
+          memoryId: "mem-1",
+          quote: "时间:2026-09-08 18:30:52至18:31:15(实例ID:3ab6838),未收到回调.",
+        },
+      ],
+      toolkit,
+    );
+
+    expect(result.valid).toBe(true);
+    expect(result.citations[0].verified).toBe(true);
+  });
+
   it("改写过的引用被拒绝", () => {
     const toolkit = stubToolkit([buildMem()]);
     const result = verifyCitations(

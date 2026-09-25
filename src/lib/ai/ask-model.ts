@@ -33,7 +33,7 @@ export const ASK_SYSTEM_PROMPT = `你是本地知识库的问答助手。回答�
 <citations>
 [{"memoryId": "记忆ID", "quote": "原文片段"}]
 </citations>
-   - quote 必须是从 read_memory 读到的 content 或 summary 中逐字摘录的片段（至少 6 个字符），不得改写、不得拼接。
+   - quote 必须与 read_memory 读到的原文逐字一致（保持原有标点与全半角），直接复制粘贴，不得改写、不得拼接、不得改标点。
    - 每条支撑性结论都要有引用；多个来源用多个对象。
 5. 如果检索与阅读后仍找不到可支撑答案的依据：直接说明"库内未找到依据"，并简述还缺什么信息（例如"未找到关于 X 的记录，可尝试导入相关会话"），引用区块写 []。
 6. 回答主题全局性问题时可用 read_topic_guide；需要原始来源全文时可用 read_source_document。`;

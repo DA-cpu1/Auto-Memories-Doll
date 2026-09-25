@@ -85,9 +85,50 @@ export function splitAnswerAndCitations(raw: string): {
   return { answer, citations, parseError };
 }
 
-/** 引用比对的归一化：去全部空白 + 小写，中文无大小写影响 */
+/**
+ * 引用比对的归一化：全半角折叠 + 去全部空白 + 小写。
+ * 模型复制原文时常出现全角标点（（）：，）写成半角或反之——这属于编码变体而非改写，
+ * 折叠后仍要求逐字命中，闸门强度不变。
+ */
 export function normalizeForCitation(text: string): string {
-  return text.replace(/\s+/g, "").toLowerCase();
+  return foldFullWidth(text).replace(/\s+/g, "").toLowerCase();
+}
+
+const CJK_PUNCT_MAP: Record<string, string> = {
+  "（": "(",
+  "）": ")",
+  "：": ":",
+  "，": ",",
+  "。": ".",
+  "；": ";",
+  "！": "!",
+  "？": "?",
+  "【": "[",
+  "】": "]",
+  "“": '"',
+  "”": '"',
+  "‘": "'",
+  "’": "'",
+  "「": '"',
+  "」": '"',
+  "—": "-",
+  "～": "~",
+  "·": "",
+};
+
+function foldFullWidth(text: string): string {
+  let out = "";
+  for (const ch of text) {
+    const mapped = CJK_PUNCT_MAP[ch];
+    if (mapped !== undefined) {
+      out += mapped;
+      continue;
+    }
+    const code = ch.codePointAt(0)!;
+    // 全角 ASCII 区（U+FF01 ！ 至 U+FF5E ～）折叠为对应半角
+    out += code >= 0xff01 && code <= 0xff5e ? String.fromCodePoint(code - 0xfee0) : ch;
+  }
+  return out;
 }
 
 export type CitationVerification = {
