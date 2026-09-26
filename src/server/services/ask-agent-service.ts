@@ -63,10 +63,50 @@ export function splitAnswerAndCitations(raw: string): {
   const last = matches[matches.length - 1];
   const answer = raw.replace(last[0], "").trim();
 
+  const parsed = parseCitationArray(last[1]);
+  return { answer, ...parsed };
+}
+
+/**
+ * 解析引用自修正的输出：模型常偏离"只输出引用区块"的指令，
+ * 出现 markdown 围栏、裸 JSON 数组或 {"citations":[...]} 包装——逐层尝试，
+ * 都失败才报 invalid-json。只影响修正路径的解析容错，校验强度不变。
+ */
+export function parseRepairCitations(raw: string): {
+  citations: ParsedCitation[];
+  parseError?: string;
+} {
+  let text = raw.trim();
+  // 剥 markdown 代码围栏（```json ... ``` 或 ``` ... ```）
+  const fence = text.match(/```(?:json)?\s*([\s\S]*?)```/);
+  if (fence) text = fence[1].trim();
+  // 剥残余的引用标签
+  text = text.replace(/<\/?citations>/g, "").trim();
+
+  const parsed = parseCitationArray(text);
+  if (parsed.citations.length > 0 || !parsed.parseError) return parsed;
+
+  // {"citations":[...]} 包装形态
+  const wrapped = text.match(/\{[\s\S]*"citations"\s*:\s*([\s\S]*?)\}\s*$/);
+  if (wrapped) {
+    const inner = parseCitationArray(wrapped[1].trim());
+    if (inner.citations.length > 0 || !inner.parseError) return inner;
+  }
+  // 任意位置的裸数组兜底
+  const bare = text.match(/\[[\s\S]*\]/);
+  if (bare && bare[0] !== text) return parseCitationArray(bare[0]);
+
+  return parsed;
+}
+
+function parseCitationArray(json: string): {
+  citations: ParsedCitation[];
+  parseError?: string;
+} {
   let citations: ParsedCitation[] = [];
   let parseError: string | undefined;
   try {
-    const parsed = JSON.parse(last[1]) as unknown;
+    const parsed = JSON.parse(json) as unknown;
     if (Array.isArray(parsed)) {
       citations = parsed.filter(
         (item): item is ParsedCitation =>
@@ -82,7 +122,7 @@ export function splitAnswerAndCitations(raw: string): {
     parseError = "citations-invalid-json";
   }
 
-  return { answer, citations, parseError };
+  return { citations, parseError };
 }
 
 /**
@@ -268,7 +308,7 @@ export class AskAgentService {
             completionTokens: usage.completionTokens + repair.usage.completionTokens,
           };
 
-          const reparsed = splitAnswerAndCitations(repair.text);
+          const reparsed = parseRepairCitations(repair.text);
           const reverification = verifyCitations(reparsed.citations, this.toolkit);
           if (reverification.valid) {
             parsed = { answer: parsed.answer, citations: reparsed.citations };

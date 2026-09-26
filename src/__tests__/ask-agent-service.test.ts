@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import {
   AskAgentService,
+  parseRepairCitations,
   splitAnswerAndCitations,
   verifyCitations,
 } from "../server/services/ask-agent-service";
@@ -104,6 +105,41 @@ describe("splitAnswerAndCitations", () => {
     expect(answer).toBe("项目使用 USearch HNSW ANN 作为向量索引。");
     expect(citations).toEqual([{ memoryId: "mem-1", quote: "USearch HNSW ANN 索引" }]);
     expect(parseError).toBeUndefined();
+  });
+
+  it("parseRepairCitations：markdown 围栏 / 裸数组 / 包装对象三种偏离形态都能解析", () => {
+    const expected = [{ memoryId: "mem-1", quote: "USearch HNSW ANN 索引" }];
+
+    expect(
+      parseRepairCitations(
+        '```json\n[{"memoryId": "mem-1", "quote": "USearch HNSW ANN 索引"}]\n```',
+      ),
+    ).toEqual({ citations: expected });
+
+    expect(
+      parseRepairCitations('[{"memoryId": "mem-1", "quote": "USearch HNSW ANN 索引"}]'),
+    ).toEqual({
+      citations: expected,
+    });
+
+    expect(
+      parseRepairCitations(
+        '修正结果：\n{"citations": [{"memoryId": "mem-1", "quote": "USearch HNSW ANN 索引"}]}',
+      ),
+    ).toEqual({ citations: expected });
+
+    // 混合形态：围栏 + 残余标签
+    expect(
+      parseRepairCitations(
+        '```\n<citations>[{"memoryId": "mem-1", "quote": "USearch HNSW ANN 索引"}]</citations>\n```',
+      ).citations,
+    ).toEqual(expected);
+  });
+
+  it("parseRepairCitations：真的不是 JSON 时报 invalid-json", () => {
+    expect(parseRepairCitations("我认为没有可引用的内容").parseError).toBe(
+      "citations-invalid-json",
+    );
   });
 
   it("无引用区块时 citations 为空并标注 parseError", () => {
