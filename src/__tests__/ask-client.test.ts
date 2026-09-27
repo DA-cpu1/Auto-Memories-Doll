@@ -39,7 +39,7 @@ describe("askQuestionStream", () => {
     expect(events[2]).toEqual({ type: "token", text: "答案" });
   });
 
-  it("跨 chunk 的事件帧正确拼接", async () => {
+  it("跨 chunk 的事件帧正确拼接，缺少终态时报告断流", async () => {
     const events: AskStreamEvent[] = [];
     const encoder = new TextEncoder();
     const body = new ReadableStream<Uint8Array>({
@@ -53,7 +53,9 @@ describe("askQuestionStream", () => {
     fetchMock.mockResolvedValue(new Response(body, { status: 200 }));
     vi.stubGlobal("fetch", fetchMock);
 
-    await askQuestionStream("q", { onEvent: (event) => events.push(event) });
+    await expect(
+      askQuestionStream("q", { onEvent: (event) => events.push(event) }),
+    ).rejects.toThrow("问答连接提前结束");
 
     expect(events).toEqual([{ type: "token", text: "分段" }]);
   });
@@ -65,7 +67,9 @@ describe("askQuestionStream", () => {
     );
     vi.stubGlobal("fetch", fetchMock);
 
-    await askQuestionStream("q", { onEvent: (event) => events.push(event) });
+    await expect(
+      askQuestionStream("q", { onEvent: (event) => events.push(event) }),
+    ).rejects.toThrow("问答连接提前结束");
 
     expect(events).toEqual([{ type: "token", text: "ok" }]);
   });

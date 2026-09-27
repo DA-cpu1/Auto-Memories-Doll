@@ -10,6 +10,10 @@ vi.mock("next/link", () => ({
   ),
 }));
 
+vi.mock("next/navigation", () => ({
+  useRouter: () => ({ push: vi.fn(), replace: vi.fn(), refresh: vi.fn() }),
+}));
+
 import MemoryLibraryPage from "../app/(main)/memory/page";
 import MemoryLibraryItem from "../components/memory/MemoryLibraryItem";
 import type { MemoryRecord } from "../types/memory";

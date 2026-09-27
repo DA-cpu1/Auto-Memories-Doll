@@ -204,6 +204,8 @@ export class Orchestrator {
         if (KnowledgeModelAdapter.isDegradedMode) return;
         const staged = await this.stageExistingMemoryOptimization(existing, false);
         if (!staged) return;
+        event.status = "processing";
+        this.memoryService.updateEvent(event);
         event.status = "done";
         this.memoryService.updateEvent(event);
         return;

@@ -9,47 +9,66 @@ const API_BASE = "/api/config";
 type Preset = { name: string; toolType: ToolType; path: string; filePattern: string };
 
 type WatchStatus = {
-  fileWatcher: { running: boolean; root: string };
+  fileWatcher?: { running?: boolean; root?: string };
   toolWatcher: {
-    configured: number;
-    running: number;
+    configured?: number;
+    running?: number;
     sources: { id: string; name: string; toolType: string; path: string }[];
   };
-  events: { pending: number; processing: number; done: number; failed: number };
+  events?: { pending?: number; processing?: number; done?: number; failed?: number };
 };
 
-function StatusBadge({ ok, label }: { ok: boolean; label: string }) {
+function StatusBadge({
+  state,
+  label,
+}: {
+  state: "running" | "stopped" | "unknown";
+  label: string;
+}) {
   return (
-    <span
-      className={`inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-full ${
-        ok ? "bg-green-500/10 text-green-600" : "bg-red-500/10 text-red-600"
-      }`}
-    >
-      <span className={`h-1.5 w-1.5 rounded-full ${ok ? "bg-green-500" : "bg-red-500"}`} />
+    <span className={`source-status-badge source-status-${state}`}>
+      <span aria-hidden="true" />
       {label}
     </span>
   );
 }
 
 export default function ToolSourcesPage() {
-  const [sources, setSources] = useState<ToolWatchSource[]>([]);
+  const [sources, setSources] = useState<ToolWatchSource[] | null>(null);
   const [presets, setPresets] = useState<Record<string, Preset>>({});
   const [status, setStatus] = useState<WatchStatus | null>(null);
+  const [sourceError, setSourceError] = useState("");
+  const [statusError, setStatusError] = useState("");
   const [scanning, setScanning] = useState(false);
   const [scanMessage, setScanMessage] = useState("");
 
   const refresh = useCallback(() => {
     fetch(`${API_BASE}/tool-sources`)
-      .then((r) => r.json())
-      .then((d) => {
-        setSources(d.sources || []);
-        setPresets(d.presets || {});
+      .then(async (response) => {
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        return response.json();
       })
-      .catch(() => {});
+      .then((data) => {
+        setSources(data.sources);
+        setPresets(data.presets);
+        setSourceError("");
+      })
+      .catch((error: unknown) =>
+        setSourceError(error instanceof Error ? error.message : "来源配置读取失败"),
+      );
     fetch(`${API_BASE}/tool-sources/status`)
-      .then((r) => r.json())
-      .then(setStatus)
-      .catch(() => {});
+      .then(async (response) => {
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        return response.json();
+      })
+      .then((data) => {
+        setStatus(data);
+        setStatusError("");
+      })
+      .catch((error: unknown) => {
+        setStatus(null);
+        setStatusError(error instanceof Error ? error.message : "监听状态读取失败");
+      });
   }, []);
 
   useEffect(() => {
@@ -63,28 +82,26 @@ export default function ToolSourcesPage() {
     try {
       const response = await fetch("/api/listen/scan", { method: "POST" });
       const payload = await response.json();
-      setScanMessage(payload.message || (response.ok ? "扫描完成" : "扫描失败"));
+      if (!response.ok) throw new Error(payload.error?.message || payload.error || "扫描失败");
+      setScanMessage(payload.message || "扫描已完成。");
       refresh();
-    } catch {
-      setScanMessage("扫描失败，请检查服务状态");
+    } catch (error) {
+      setScanMessage(error instanceof Error ? error.message : "扫描失败，请检查服务状态");
     } finally {
       setScanning(false);
     }
   };
 
   return (
-    <div className="mx-auto max-w-4xl space-y-6 p-4 py-8 sm:p-6 md:py-10">
-      <header className="flex flex-col gap-4 border-b border-border pb-6 sm:flex-row sm:items-end sm:justify-between">
+    <div className="settings-page">
+      <header className="settings-page-heading settings-page-heading-actions">
         <div>
-          <p className="mb-2 font-mono text-xs font-semibold uppercase text-text-tertiary">
-            Source registry
-          </p>
-          <h1 className="text-3xl font-bold text-text-primary">来源设置</h1>
-          <p className="mt-2 text-sm text-text-secondary">管理本地目录与开发工具会话的采集入口。</p>
+          <h1>来源监听</h1>
+          <p>管理本地目录与开发工具会话的采集入口。</p>
         </div>
         <button
           type="button"
-          className="btn self-start"
+          className="btn"
           onClick={() => void scanSources()}
           disabled={scanning}
         >
@@ -92,70 +109,98 @@ export default function ToolSourcesPage() {
         </button>
       </header>
       {scanMessage ? (
-        <p
-          role="status"
-          className="border-l-2 border-accent bg-accent-soft px-4 py-3 text-sm text-text-secondary"
-        >
+        <p role="status" className="notice notice-neutral">
           {scanMessage}
         </p>
       ) : null}
-      <section className="rounded-lg border border-border bg-surface p-5 sm:p-6">
-        <h2 className="text-lg font-semibold text-text-primary mb-1">运行状态</h2>
-        <p className="text-xs text-text-tertiary mb-4">
-          监听器与采集队列的实时情况（配置变更后自动刷新）
-        </p>
-        <div className="space-y-3 text-sm">
-          <div className="flex items-center justify-between gap-3">
+      <section className="settings-section">
+        <h2>运行状态</h2>
+        <p className="section-note">监听器与采集队列的实时情况。来源变更后会自动刷新。</p>
+        {statusError ? (
+          <p className="notice notice-warning" role="status">
+            状态暂不可用：{statusError}
+          </p>
+        ) : null}
+        <div className="source-runtime-list">
+          <div className="source-runtime-row">
             <div>
-              <p className="text-text-secondary">文件监听</p>
-              <p className="text-xs text-text-tertiary font-mono break-all">
-                {status?.fileWatcher.root || "—"}
-              </p>
+              <strong>文件监听</strong>
+              <span>{status?.fileWatcher?.root || "监听路径未知"}</span>
             </div>
             <StatusBadge
-              ok={!!status?.fileWatcher.running}
-              label={status?.fileWatcher.running ? "运行中" : "未运行"}
-            />
-          </div>
-          <div className="flex items-center justify-between gap-3">
-            <div>
-              <p className="text-text-secondary">工具目录监听</p>
-              <p className="text-xs text-text-tertiary">
-                {status
-                  ? status.toolWatcher.running > 0
-                    ? `${status.toolWatcher.running} 个源监听中`
-                    : status.toolWatcher.configured > 0
-                      ? "已配置但未运行，重启服务后生效"
-                      : "尚未配置监听源"
-                  : "—"}
-              </p>
-            </div>
-            <StatusBadge
-              ok={(status?.toolWatcher.running ?? 0) > 0}
+              state={
+                status?.fileWatcher?.running === undefined
+                  ? "unknown"
+                  : status.fileWatcher.running
+                    ? "running"
+                    : "stopped"
+              }
               label={
-                status
-                  ? `${status.toolWatcher.running} / ${status.toolWatcher.configured} 活跃`
-                  : "—"
+                status?.fileWatcher?.running === undefined
+                  ? "未知"
+                  : status.fileWatcher.running
+                    ? "运行中"
+                    : "未运行"
               }
             />
           </div>
-          <div className="flex items-center justify-between gap-3">
+          <div className="source-runtime-row">
             <div>
-              <p className="text-text-secondary">采集队列</p>
-              <p className="text-xs text-text-tertiary">
-                待处理 {status?.events.pending ?? 0} · 失败 {status?.events.failed ?? 0}
-              </p>
+              <strong>工具目录监听</strong>
+              <span>
+                {status?.toolWatcher.running === undefined
+                  ? "运行状态未知"
+                  : status.toolWatcher.running > 0
+                    ? `${status.toolWatcher.running} 个源监听中`
+                    : status.toolWatcher.configured === undefined
+                      ? "配置数量未知"
+                      : status.toolWatcher.configured > 0
+                        ? "已配置但当前未运行"
+                        : "尚未配置监听源"}
+              </span>
             </div>
+            <StatusBadge
+              state={
+                status?.toolWatcher.running === undefined
+                  ? "unknown"
+                  : status.toolWatcher.running > 0
+                    ? "running"
+                    : "stopped"
+              }
+              label={
+                status?.toolWatcher.running === undefined
+                  ? "未知"
+                  : `${status.toolWatcher.running} / ${status.toolWatcher.configured ?? "—"} 活跃`
+              }
+            />
+          </div>
+          <div className="source-runtime-row">
+            <div>
+              <strong>采集队列</strong>
+              <span>
+                待处理 {status?.events?.pending ?? "—"} · 失败 {status?.events?.failed ?? "—"}
+              </span>
+            </div>
+            <span className="runtime-detail">
+              处理中 {status?.events?.processing ?? "—"} · 已完成 {status?.events?.done ?? "—"}
+            </span>
           </div>
         </div>
       </section>
 
-      <section className="rounded-lg border border-border bg-surface p-5 sm:p-6">
-        <h2 className="text-lg font-semibold text-text-primary mb-1">监听源</h2>
-        <p className="text-xs text-text-tertiary mb-6">
-          新增、编辑、停用或移除来源；变更后监听器会自动重启。
-        </p>
-        <ToolSourceList sources={sources} presets={presets} onChange={refresh} />
+      <section className="settings-section">
+        <h2>监听源</h2>
+        <p className="section-note">新增、编辑、停用或移除来源；变更后监听器会自动重启。</p>
+        {sourceError ? (
+          <p className="notice notice-error" role="alert">
+            来源配置暂不可用：{sourceError}
+          </p>
+        ) : null}
+        {sources === null ? (
+          <p className="empty-inline">{sourceError ? "来源列表尚未读取。" : "正在读取来源列表…"}</p>
+        ) : (
+          <ToolSourceList sources={sources} presets={presets} onChange={() => refresh()} />
+        )}
       </section>
     </div>
   );

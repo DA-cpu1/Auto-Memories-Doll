@@ -93,6 +93,23 @@ describe("memory browser API client", () => {
     );
   });
 
+  it("sends keyword and topic together for filtered search", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      jsonResponse({
+        success: true,
+        data: { results: [memory], total: 1, retrievalMode: "keyword", degradedMode: true },
+      }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    await searchMemoriesClient("测试 查询", 10, "project notes");
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/memory/search?q=%E6%B5%8B%E8%AF%95%20%E6%9F%A5%E8%AF%A2&limit=10&topic=project%20notes",
+      undefined,
+    );
+  });
+
   it("does not issue a request for an empty search", async () => {
     const fetchMock = vi.fn();
     vi.stubGlobal("fetch", fetchMock);

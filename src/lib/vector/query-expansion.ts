@@ -26,17 +26,22 @@ export async function searchWithExpansion(
 ): Promise<{ memoryId: string; similarity: number }[]> {
   const { expansionEnabled = true, minSimilarity } = options;
 
-  const variants = expansionEnabled ? await rewriteQueryVariants(query) : [];
-  const queries = [query.trim(), ...variants];
-
   const best = new Map<string, number>();
-  const resultSets = await Promise.all(
-    queries.map((currentQuery) =>
-      minSimilarity !== undefined
-        ? retriever.search(currentQuery, limit, minSimilarity)
-        : retriever.search(currentQuery, limit),
-    ),
-  );
+  const search = (currentQuery: string) =>
+    minSimilarity !== undefined
+      ? retriever.search(currentQuery, limit, minSimilarity)
+      : retriever.search(currentQuery, limit);
+  const originalSearch = search(query.trim());
+  const rewrittenSearches = (async () => {
+    const variants = expansionEnabled ? await rewriteQueryVariants(query) : [];
+    const results = await Promise.all(variants.map(search));
+    return { variants, results };
+  })();
+  const [originalResults, { variants, results: variantResults }] = await Promise.all([
+    originalSearch,
+    rewrittenSearches,
+  ]);
+  const resultSets = [originalResults, ...variantResults];
   for (const results of resultSets) {
     for (const r of results) {
       const prev = best.get(r.memoryId);
@@ -70,13 +75,20 @@ export async function searchWithExpansionDetailed(
   mode: RetrievalMode;
 }> {
   const { expansionEnabled = true, minSimilarity } = options;
-  const variants = expansionEnabled ? await rewriteQueryVariants(query) : [];
-  const queries = [query.trim(), ...variants];
   const best = new Map<string, number>();
-  const responses = await Promise.all(
-    queries.map((currentQuery) => retriever.searchDetailed(currentQuery, limit, minSimilarity)),
-  );
-  const mode: RetrievalMode = responses[0]?.mode ?? "keyword";
+  const originalSearch = retriever.searchDetailed(query.trim(), limit, minSimilarity);
+  const rewrittenSearches = (async () => {
+    const variants = expansionEnabled ? await rewriteQueryVariants(query) : [];
+    return Promise.all(
+      variants.map((currentQuery) => retriever.searchDetailed(currentQuery, limit, minSimilarity)),
+    );
+  })();
+  const [originalResponse, variantResponses] = await Promise.all([
+    originalSearch,
+    rewrittenSearches,
+  ]);
+  const responses = [originalResponse, ...variantResponses];
+  const mode: RetrievalMode = originalResponse.mode;
 
   for (const response of responses) {
     for (const result of response.results) {

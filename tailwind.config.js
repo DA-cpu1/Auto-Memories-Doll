@@ -8,29 +8,29 @@ module.exports = {
   theme: {
     extend: {
       colors: {
-        /* 背景：暖白系 */
+        /* 背景：浅灰白工作台 */
         bg: "var(--color-bg)",
         "bg-secondary": "var(--color-bg-secondary)",
         "bg-tertiary": "var(--color-bg-tertiary)",
         /* 表面：卡片白 */
         surface: "var(--color-surface)",
         "surface-elevated": "var(--color-surface-elevated)",
-        /* 文字：深棕系 */
+        /* 文字：中性灰阶 */
         "text-primary": "var(--color-text-primary)",
         "text-secondary": "var(--color-text-secondary)",
         "text-tertiary": "var(--color-text-tertiary)",
-        /* 边框：浅棕 */
+        /* 边框：浅灰 */
         border: "var(--color-border-default)",
         "border-hover": "var(--color-border-hover)",
         "border-strong": "var(--color-border-strong)",
-        /* 强调色：暗金 */
+        /* 强调色：蓝色 */
         accent: "var(--color-accent)",
         "accent-hover": "var(--color-accent-hover)",
         "accent-text": "var(--color-accent-text)",
         "accent-light": "var(--accent-light)",
         "accent-soft": "var(--accent-soft)",
         muted: "var(--color-muted)",
-        /* 状态色（暖色调） */
+        /* 状态色 */
         error: "var(--color-error)",
         "error-bg": "var(--color-error-bg)",
         success: "var(--color-success)",
@@ -38,7 +38,7 @@ module.exports = {
         warning: "var(--color-warning)",
         "warning-bg": "var(--color-warning-bg)",
         gold: "var(--color-gold)",
-        /* 品牌色：棕白金 */
+        /* 兼容历史页面类名 */
         brown: {
           DEFAULT: "#3E3224",
           light: "#5D4E37",
@@ -61,9 +61,9 @@ module.exports = {
       borderRadius: {
         sm: "6px",
         DEFAULT: "8px",
-        md: "8px",
-        lg: "8px",
-        xl: "8px",
+        md: "10px",
+        lg: "14px",
+        xl: "18px",
         full: "9999px",
       },
       boxShadow: {
@@ -77,13 +77,8 @@ module.exports = {
         inner: "var(--shadow-inner)",
       },
       fontFamily: {
-        sans: [
-          '"Geist"',
-          '"PingFang SC"',
-          '"Microsoft YaHei"',
-          'sans-serif',
-        ],
-        // 等宽字体（rl-handbook 风格标题字体）
+        sans: ['"Geist"', '"PingFang SC"', '"Microsoft YaHei"', "sans-serif"],
+        // 等宽字体
         mono: [
           '"Geist Mono"',
           '"SF Mono"',
@@ -91,9 +86,9 @@ module.exports = {
           '"Consolas"',
           '"PingFang SC"',
           '"Microsoft YaHei"',
-          'monospace',
+          "monospace",
         ],
-        // 显示字体（用于 Hero 标题）
+        // 兼容历史显示标题类
         heading: [
           '"Geist Mono"',
           '"SF Mono"',
@@ -101,7 +96,7 @@ module.exports = {
           '"Consolas"',
           '"PingFang SC"',
           '"Microsoft YaHei"',
-          'monospace',
+          "monospace",
         ],
       },
       fontSize: {
@@ -125,13 +120,10 @@ module.exports = {
         smooth: "cubic-bezier(0.4, 0, 0.2, 1)",
       },
       backgroundImage: {
-        'pop-dots': `
-          radial-gradient(rgba(166, 124, 0, 0.08) 1.5px, transparent 1.5px),
-          radial-gradient(rgba(139, 115, 85, 0.06) 1px, transparent 1px)
-        `,
+        "pop-dots": `radial-gradient(rgba(18, 103, 173, 0.035) 1px, transparent 1px)`,
       },
       backgroundSize: {
-        'pop-dots': '48px 48px, 48px 48px',
+        "pop-dots": "36px 36px",
       },
     },
   },

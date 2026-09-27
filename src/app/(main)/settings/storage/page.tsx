@@ -16,12 +16,16 @@ export default function StorageSettingsPage() {
   const [error, setError] = useState<string | null>(null);
 
   const load = () => {
+    setError(null);
     fetch(`${API_BASE}/storage`)
       .then((r) => {
         if (!r.ok) throw new Error(`HTTP ${r.status}`);
         return r.json();
       })
-      .then(setConfig)
+      .then((data: StorageConfig) => {
+        setConfig(data);
+        setError(null);
+      })
       .catch((e) => setError(e.message));
   };
 
@@ -30,37 +34,39 @@ export default function StorageSettingsPage() {
   }, []);
 
   const handleChanged = () => {
-    setError(null);
     load();
   };
 
   if (error) {
     return (
-      <div className="p-6 md:p-10 max-w-3xl mx-auto">
-        <div className="card p-6 text-center">
-          <p className="text-error text-sm">加载失败: {error}</p>
-          <button
-            onClick={load}
-            className="mt-3 px-4 py-2 rounded-lg bg-accent/15 text-accent text-sm hover:bg-accent/25 transition-all"
-          >
-            重试
-          </button>
+      <div className="settings-page">
+        <header className="settings-page-heading">
+          <h1>存储路径</h1>
+          <p>配置记忆笔记的位置并查看固定数据库路径。</p>
+        </header>
+        <div className="notice notice-error" role="alert">
+          加载失败：{error}
         </div>
+        <button onClick={load} className="btn-secondary mt-3">
+          重试
+        </button>
       </div>
     );
   }
 
   return (
-    <div className="p-6 md:p-10 max-w-3xl mx-auto">
-      <div className="card p-6">
-        <h2 className="text-lg font-semibold text-text-primary mb-1">存储路径</h2>
-        <p className="text-xs text-text-tertiary mb-6">配置记忆库文件的本地存储位置</p>
-        {config ? (
-          <StorageConfigForm config={config} onChanged={handleChanged} />
-        ) : (
-          <p className="text-text-tertiary text-sm">加载中…</p>
-        )}
-      </div>
+    <div className="settings-page">
+      <header className="settings-page-heading">
+        <h1>存储路径</h1>
+        <p>配置记忆笔记的位置并查看固定数据库路径。</p>
+      </header>
+      {config ? (
+        <StorageConfigForm config={config} onChanged={handleChanged} />
+      ) : (
+        <div className="settings-loading">
+          <span>正在读取存储配置…</span>
+        </div>
+      )}
     </div>
   );
 }

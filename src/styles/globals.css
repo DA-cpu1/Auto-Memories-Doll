@@ -1,12 +1,10 @@
 /*
- * 全局样式 - 棕白金波普美学（基于 amagine.ai 设计框架）
+ * 全局样式 - 浅灰白知识工作台
  *
  * 视觉方向：
- * - 深棕暖调背景（#2C2416）
- * - 暖白卡片前景（#FFFDF9）
- * - 暗金色强调（#A67C00 / #C9A227）
- * - 波普点阵装饰（规则圆点阵列）
- * - 精致圆角 + 微妙阴影
+ * - 浅灰画布与白色内容表面
+ * - 克制的蓝色操作强调
+ * - 轻边界、柔和圆角与低对比阴影
  */
 
 @tailwind base;
@@ -14,35 +12,29 @@
 @tailwind utilities;
 
 :root {
-  /* ── 色彩系统 (Brown-White-Gold Pop) ── */
-  --background: #202826;
-  --background-elevated: #2c3734;
-  --background-warm: #f4f3ee;
+  /* 浅灰白工作台与克制的蓝色强调 */
+  --background: #f5f5f7;
+  --background-elevated: #ffffff;
+  --background-warm: #f5f5f7;
+  --foreground: #202124;
+  --foreground-dim: #4d5158;
+  --foreground-subtle: #737780;
+  --muted: #858991;
+  --accent: #1267ad;
+  --accent-hover: #0e548e;
+  --accent-light: #4a8dc4;
+  --accent-soft: rgba(18, 103, 173, 0.08);
+  --accent-line: rgba(18, 103, 173, 0.2);
+  --accent-glow: rgba(18, 103, 173, 0.1);
+  --card-bg: #ffffff;
+  --card-bg-alt: #f0f1f3;
+  --card-border: #e2e4e8;
+  --card-border-hover: #c8ccd3;
 
-  /* 前景文字：深棕系 */
-  --foreground: #202826;
-  --foreground-dim: #46524e;
-  --foreground-subtle: #687570;
-  --muted: #8f9995;
-
-  /* 强调色：暗金色系 */
-  --accent: #0f766e;
-  --accent-hover: #0b5f59;
-  --accent-light: #3f9c93;
-  --accent-soft: rgba(15, 118, 110, 0.09);
-  --accent-line: rgba(15, 118, 110, 0.28);
-  --accent-glow: rgba(15, 118, 110, 0.14);
-
-  /* 卡片系统：暖白色系 */
-  --card-bg: #fffefa;
-  --card-bg-alt: #f0f1ec;
-  --card-border: #d9ddd7;
-  --card-border-hover: #aebbb5;
-
-  /* 波普点装饰 */
-  --pop-dot-color: rgba(166, 124, 0, 0.08);
-  --pop-dot-color-alt: rgba(139, 115, 85, 0.06);
-  --strike: #c9bba8;
+  /* 兼容旧装饰变量；当前界面不绘制背景纹理 */
+  --pop-dot-color: rgba(18, 103, 173, 0.035);
+  --pop-dot-color-alt: rgba(32, 33, 36, 0.025);
+  --strike: #d6d8dc;
 
   /* 兼容旧 class 名的映射 */
   --color-bg: var(--background-warm);
@@ -69,29 +61,29 @@
   --color-text-dim: var(--foreground-dim);
   --color-text-subtle: var(--foreground-subtle);
 
-  /* 状态色（适配暖色调） */
-  --color-error: #c0392b;
-  --color-error-bg: rgba(192, 57, 43, 0.08);
-  --color-success: #6b8e23;
-  --color-success-bg: rgba(107, 142, 35, 0.08);
-  --color-warning: var(--accent);
-  --color-warning-bg: var(--accent-soft);
-  --color-gold: #b8860b;
+  /* 状态色 */
+  --color-error: #b42318;
+  --color-error-bg: rgba(180, 35, 24, 0.07);
+  --color-success: #216e4e;
+  --color-success-bg: rgba(33, 110, 78, 0.07);
+  --color-warning: #8b5e15;
+  --color-warning-bg: rgba(187, 132, 34, 0.1);
+  --color-gold: #a06b1e;
 
   /* 圆角 */
-  --radius-sm: 6px;
-  --radius-md: 8px;
-  --radius-lg: 8px;
-  --radius-xl: 8px;
+  --radius-sm: 8px;
+  --radius-md: 12px;
+  --radius-lg: 16px;
+  --radius-xl: 20px;
   --radius-full: 9999px;
 
-  /* 阴影（暖色调柔和阴影） */
-  --shadow-card: 0 1px 3px rgba(44, 36, 22, 0.06), 0 1px 2px rgba(44, 36, 22, 0.04);
-  --shadow-card-hover: 0 8px 24px rgba(44, 36, 22, 0.1), 0 2px 6px rgba(44, 36, 22, 0.05);
+  /* 柔和阴影 */
+  --shadow-card: 0 8px 28px rgba(31, 41, 55, 0.045), 0 1px 3px rgba(31, 41, 55, 0.025);
+  --shadow-card-hover: 0 12px 32px rgba(31, 41, 55, 0.075), 0 2px 7px rgba(31, 41, 55, 0.035);
   --shadow-focus: 0 0 0 3px var(--accent-soft);
-  --shadow-sm: 0 1px 2px rgba(44, 36, 22, 0.05);
-  --shadow-md: 0 4px 12px rgba(44, 36, 22, 0.08);
-  --shadow-lg: 0 12px 32px rgba(44, 36, 22, 0.12);
+  --shadow-sm: 0 1px 2px rgba(31, 41, 55, 0.05);
+  --shadow-md: 0 4px 14px rgba(31, 41, 55, 0.08);
+  --shadow-lg: 0 12px 32px rgba(31, 41, 55, 0.12);
   --shadow-glow: 0 0 24px var(--accent-glow);
   --shadow-inner: inset 0 1px 0 rgba(255, 255, 255, 0.6);
 
@@ -110,18 +102,16 @@ body {
   background: var(--background-warm);
   color: var(--foreground);
   font-family:
-    "Geist",
-    -apple-system,
-    "SF Pro",
-    "Segoe UI",
-    "PingFang SC",
-    "Microsoft YaHei",
-    sans-serif;
+    -apple-system, BlinkMacSystemFont, "SF Pro Text", "PingFang SC", "Microsoft YaHei", sans-serif;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
   line-height: 1.6;
   letter-spacing: 0;
   min-height: 100vh;
+}
+
+body::before {
+  display: none;
 }
 
 /* ── 波普点阵背景 ── */

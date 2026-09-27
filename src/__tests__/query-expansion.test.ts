@@ -77,6 +77,23 @@ describe("searchWithExpansion", () => {
     ]);
   });
 
+  it("基础检索不等待改写模型才搜索原句", async () => {
+    let releaseRewrite!: (variants: string[]) => void;
+    mocks.rewriteQueryVariants.mockReturnValue(
+      new Promise<string[]>((resolve) => {
+        releaseRewrite = resolve;
+      }),
+    );
+    const retriever = makeRetriever({
+      原句查询: [{ memoryId: "m1", similarity: 0.9 }],
+    });
+
+    const pending = searchWithExpansion(retriever, "原句查询", 10);
+    expect(retriever.search).toHaveBeenCalledWith("原句查询", 10);
+    releaseRewrite([]);
+    await expect(pending).resolves.toEqual([{ memoryId: "m1", similarity: 0.9 }]);
+  });
+
   it("合并结果超过 limit 时截断", async () => {
     mocks.rewriteQueryVariants.mockResolvedValue(["变体A"]);
     const retriever = makeRetriever({
@@ -131,5 +148,30 @@ describe("searchWithExpansion", () => {
     expect(response.results.map((result) => result.memoryId)).toEqual(["m1", "m2"]);
     expect(searchDetailed).toHaveBeenCalledWith("原句查询", 10, 0.3);
     expect(searchDetailed).toHaveBeenCalledWith("改写查询", 10, 0.3);
+  });
+
+  it("改写模型未返回时先开始原句检索", async () => {
+    let releaseRewrite!: (variants: string[]) => void;
+    mocks.rewriteQueryVariants.mockReturnValue(
+      new Promise<string[]>((resolve) => {
+        releaseRewrite = resolve;
+      }),
+    );
+    const searchDetailed = vi.fn(async (query: string) => ({
+      mode: "keyword" as const,
+      results: [{ memoryId: query === "原句查询" ? "m1" : "m2", similarity: 0.8 }],
+    }));
+
+    const pending = searchWithExpansionDetailed({ searchDetailed }, "原句查询", 10);
+    expect(searchDetailed).toHaveBeenCalledWith("原句查询", 10, undefined);
+    releaseRewrite(["改写查询"]);
+
+    await expect(pending).resolves.toEqual({
+      mode: "keyword",
+      results: [
+        { memoryId: "m1", similarity: 0.8 },
+        { memoryId: "m2", similarity: 0.8 },
+      ],
+    });
   });
 });

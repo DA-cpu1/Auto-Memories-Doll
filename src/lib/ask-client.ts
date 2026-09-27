@@ -31,15 +31,21 @@ export async function askQuestionStream(
   const reader = response.body.getReader();
   const decoder = new TextDecoder();
   let buffer = "";
+  let hasOutcome = false;
 
   const flushFrame = (frame: string) => {
     for (const line of frame.split("\n")) {
       if (line.startsWith("data: ")) {
+        let event: AskStreamEvent;
         try {
-          callbacks.onEvent(JSON.parse(line.slice(6)) as AskStreamEvent);
+          event = JSON.parse(line.slice(6)) as AskStreamEvent;
         } catch {
           // 忽略无法解析的帧，保持流继续
+          continue;
         }
+        if (event.type === "citations" || event.type === "refusal" || event.type === "error")
+          hasOutcome = true;
+        callbacks.onEvent(event);
       }
     }
   };
@@ -57,7 +63,9 @@ export async function askQuestionStream(
     }
   }
 
+  buffer += decoder.decode();
   if (buffer.trim().length > 0) flushFrame(buffer);
+  if (!hasOutcome) throw new Error("问答连接提前结束，请重试。");
 }
 
 export async function fetchAskStats(): Promise<AskStats> {

@@ -262,7 +262,7 @@ vi.mock("../features/audit/reporter", () => ({
 }));
 
 // ── 实际导入被测试类 ──
-import { Orchestrator } from "../server/services/orchestrator";
+import { FULL_REBUILD_TAG, Orchestrator } from "../server/services/orchestrator";
 import { MemoryValidationError } from "../lib/errors";
 
 vi.mock("../server/services/memory-service", () => ({
@@ -597,6 +597,33 @@ describe("Orchestrator", () => {
   // ═══════════════════════════════════════════════════════════════
 
   describe("processEvent — 更新记忆", () => {
+    it("全量重建事件按 pending → processing → done 更新状态", async () => {
+      const event = {
+        ...builderMock.pendingEvent,
+        eventType: "update" as const,
+        status: "pending" as const,
+        retryCount: 0,
+        candidate: JSON.stringify({
+          ...builderMock.memoryRecord,
+          tags: [FULL_REBUILD_TAG],
+        }),
+      };
+      const transitions: string[] = [];
+      memoryServiceStub.getPendingEvents.mockReturnValue([event]);
+      memoryServiceStub.getMemory.mockReturnValue(builderMock.memoryRecord);
+      memoryServiceStub.updateEvent.mockImplementation((updated) => {
+        transitions.push(updated.status);
+      });
+      vi.spyOn(orchestrator as never, "stageExistingMemoryOptimization" as never).mockResolvedValue(
+        true as never,
+      );
+
+      await orchestrator.processQueue();
+
+      expect(transitions).toEqual(["processing", "done"]);
+      expect(event.status).toBe("done");
+    });
+
     it("Auditor 返回 auto_merge → updateMemory → 同步 Markdown + 分类 + 索引", async () => {
       const event = {
         ...builderMock.pendingEvent,

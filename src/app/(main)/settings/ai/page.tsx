@@ -12,9 +12,11 @@ export default function AiSettingsPage() {
   const [providerCatalog, setProviderCatalog] = useState<ProviderCatalog | undefined>();
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [loadAttempt, setLoadAttempt] = useState(0);
 
   useEffect(() => {
-    fetch("/api/config/ai")
+    const controller = new AbortController();
+    fetch("/api/config/ai", { signal: controller.signal })
       .then(async (r) => {
         if (!r.ok) throw new Error(`加载配置失败（${r.status}）`);
         return (await r.json()) as AiConfigResponse;
@@ -23,11 +25,14 @@ export default function AiSettingsPage() {
         const { providerCatalog: catalog, ...safeConfig } = data;
         setProviderCatalog(catalog);
         setConfig(safeConfig);
+        setError(null);
       })
       .catch((e: unknown) => {
+        if (controller.signal.aborted) return;
         setError(e instanceof Error ? e.message : "加载配置失败");
       });
-  }, []);
+    return () => controller.abort();
+  }, [loadAttempt]);
 
   const handleSave = async (next: AiConfig) => {
     setSaving(true);
@@ -51,34 +56,46 @@ export default function AiSettingsPage() {
   };
 
   return (
-    <div className="p-6 md:p-10 max-w-3xl mx-auto">
-      <div className="card p-6">
-        <h2 className="text-lg font-semibold text-text-primary mb-1">AI 配置</h2>
-        <p className="text-xs text-text-tertiary mb-6">
-          提供商、模型分层与 Embedding — 保存到服务端配置，立即生效
-        </p>
-        {error && (
-          <div className="mb-4 rounded-lg border border-red-300 bg-red-50 px-4 py-3 text-sm text-red-700">
-            {error}
-          </div>
-        )}
-        {!config ? (
-          <div className="flex items-center justify-center py-12">
+    <div className="settings-page">
+      <header className="settings-page-heading">
+        <h1>AI 模型</h1>
+        <p>配置语言模型与 Embedding 服务。保存后立即用于后续处理。</p>
+      </header>
+      {error ? (
+        <div className="notice notice-error" role="alert">
+          {error}
+        </div>
+      ) : null}
+      {!config ? (
+        error ? (
+          <button
+            type="button"
+            className="btn-secondary mt-3"
+            onClick={() => {
+              setError(null);
+              setLoadAttempt((attempt) => attempt + 1);
+            }}
+          >
+            重试
+          </button>
+        ) : (
+          <div className="settings-loading">
             <div className="loading-dots">
               <span />
               <span />
               <span />
             </div>
+            <span>正在读取已保存的配置…</span>
           </div>
-        ) : (
-          <AiConfigForm
-            config={config}
-            providerCatalog={providerCatalog}
-            onSave={handleSave}
-            saving={saving}
-          />
-        )}
-      </div>
+        )
+      ) : (
+        <AiConfigForm
+          config={config}
+          providerCatalog={providerCatalog}
+          onSave={handleSave}
+          saving={saving}
+        />
+      )}
     </div>
   );
 }

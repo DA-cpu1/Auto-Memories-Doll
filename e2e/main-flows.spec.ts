@@ -46,7 +46,7 @@ test("来源配置到自动发布、检索、主题资料和来源追溯形成�
   const diagnostics = collectBrowserDiagnostics(page);
 
   await page.goto("/settings/tools");
-  await expect(page.getByRole("heading", { name: "来源设置" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "来源监听" })).toBeVisible();
   await page.getByRole("button", { name: "新增自定义来源" }).click();
   await page.getByLabel("名称").fill(SOURCE_NAME);
   await page.getByLabel("来源类型").selectOption("markdown");
@@ -70,15 +70,29 @@ test("来源配置到自动发布、检索、主题资料和来源追溯形成�
 
   await replayQueue(request);
   await page.goto("/memory");
-  await page.getByPlaceholder("搜索标题、摘要、正文或标签...").fill("KnowledgeAgent 循环");
+  await expect(page.locator(".memory-library-grid")).toBeVisible();
+  await page.getByRole("button", { name: new RegExp(SOURCE_TITLE) }).click();
+  await expect(page.getByRole("dialog", { name: "记忆详情" })).toContainText(SOURCE_TITLE);
+  await page.getByRole("button", { name: "关闭", exact: true }).click();
+  await page.getByPlaceholder("搜索标题、摘要、正文或标签…").fill("KnowledgeAgent 循环");
   await page.getByRole("button", { name: "搜索记忆" }).click();
-  await expect(page.getByText("当前处于降级模式", { exact: false })).toBeVisible();
-  await expect(page.getByRole("link", { name: `查看记忆：${SOURCE_TITLE}` })).toBeVisible();
-  await expect(page.getByText(`来源 ${SOURCE_NAME}:`, { exact: false })).toBeVisible();
+  await expect(
+    page.getByText("Embedding 当前不可用，本次搜索使用关键词匹配。", { exact: true }),
+  ).toBeVisible();
+  await expect(page.getByRole("tab", { name: new RegExp(SOURCE_TITLE) })).toBeVisible();
+  await expect(page.getByRole("tabpanel")).toContainText(SOURCE_NAME);
+  await page.getByLabel("话题").selectOption("learning");
+  await expect(page.getByRole("tab", { name: new RegExp(SOURCE_TITLE) })).toBeVisible();
+  await page.getByLabel("话题").selectOption("ai-coding");
+  await expect(page.getByText("没有找到匹配的记忆")).toBeVisible();
+  await page.getByLabel("话题").selectOption("learning");
+  await expect(page.getByRole("tab", { name: new RegExp(SOURCE_TITLE) })).toBeVisible();
 
-  await page.getByRole("link", { name: "话题：学习笔记" }).click();
+  await page.getByRole("link", { name: "打开主题资料" }).click();
   await expect(page).toHaveURL(/\/memory\/topic\/learning$/);
-  await expect(page.getByRole("heading", { name: /学习笔记\s*学习资料/ })).toBeVisible();
+  await expect(page.getByRole("heading", { name: /学习笔记\s*学习资料/ })).toBeVisible({
+    timeout: 30000,
+  });
   await expect(page.getByRole("heading", { name: "来源版本", exact: true })).toBeVisible();
   await expect(page.getByText("observable-agent-loop.md", { exact: false })).toBeVisible();
   await expect(page.getByRole("link", { name: SOURCE_TITLE })).toBeVisible();
@@ -105,7 +119,7 @@ test("未变化来源重复扫描不产生副本", async ({ page, request }) => 
   expect((await request.get("/api/audit/review-events")).status()).toBe(404);
 
   await page.goto("/memory");
-  await expect(page.getByRole("link", { name: `查看记忆：${SOURCE_TITLE}` })).toHaveCount(1);
+  await expect(page.getByRole("button", { name: new RegExp(SOURCE_TITLE) })).toHaveCount(1);
   expect(diagnostics).toEqual([]);
 });
 
@@ -113,7 +127,10 @@ test("手机端主页面无横向溢出且可访问已发布知识", async ({ pa
   const diagnostics = collectBrowserDiagnostics(page);
   await page.setViewportSize({ width: 390, height: 844 });
   await page.goto("/");
-  const searchBounds = await page.getByRole("button", { name: "检索", exact: true }).boundingBox();
+  await page.getByRole("button", { name: "检索", exact: true }).click();
+  const searchBounds = await page
+    .getByRole("button", { name: "开始检索", exact: true })
+    .boundingBox();
   expect(searchBounds!.x + searchBounds!.width).toBeLessThanOrEqual(390);
   const pageMetrics = await page.evaluate(() => ({
     viewportWidth: document.documentElement.clientWidth,
@@ -121,10 +138,78 @@ test("手机端主页面无横向溢出且可访问已发布知识", async ({ pa
   }));
   expect(pageMetrics.pageWidth).toBeLessThanOrEqual(pageMetrics.viewportWidth);
 
-  await page.getByPlaceholder("输入关键词或自然语言问题").fill("KnowledgeAgent");
-  await page.getByRole("button", { name: "检索", exact: true }).click();
+  await page.getByLabel("输入问题或关键词").fill("KnowledgeAgent");
+  await page.getByRole("button", { name: "开始检索", exact: true }).click();
   await expect(page.getByText(SOURCE_TITLE).first()).toBeVisible();
   expect(diagnostics).toEqual([]);
+});
+
+test("首页提问立即显示问题，处理轨迹位于回答上方并在完成后折叠", async ({ page }) => {
+  const events = [
+    { type: "start", askId: "ui-redesign-ask" },
+    { type: "tool_call", tool: "search_memory", args: { query: "来源版本" } },
+    { type: "tool_result", tool: "search_memory", resultSummary: "找到 1 条相关记忆" },
+    { type: "token", text: "来源版本使用稳定身份避免重复入库。" },
+    {
+      type: "citations",
+      citations: [
+        { memoryId: "memory-source-revision", quote: "稳定身份避免重复入库", verified: true },
+      ],
+    },
+    {
+      type: "done",
+      usage: { promptTokens: 18, completionTokens: 9 },
+      durationMs: 22,
+      askId: "ui-redesign-ask",
+      mode: "stream",
+    },
+  ];
+  await page.route("**/api/ask", async (route) => {
+    if (route.request().method() !== "POST") {
+      await route.continue();
+      return;
+    }
+    await new Promise((resolveDelay) => setTimeout(resolveDelay, 1200));
+    await route.fulfill({
+      status: 200,
+      headers: { "content-type": "text/event-stream; charset=utf-8" },
+      body: events.map((event) => `data: ${JSON.stringify(event)}\n\n`).join(""),
+    });
+  });
+
+  await page.goto("/");
+  await page.getByLabel("输入问题或关键词").fill("来源版本如何避免重复入库？");
+  await page.getByRole("button", { name: "发送提问", exact: true }).click();
+
+  const exchange = page.locator(".exchange").last();
+  await expect(exchange.getByText("来源版本如何避免重复入库？", { exact: true })).toBeVisible();
+  await expect(exchange.getByText("正在处理", { exact: true })).toBeVisible();
+  await page.getByLabel("输入问题或关键词").fill("继续追问草稿");
+  await page.getByLabel("输入问题或关键词").press("Enter");
+  await expect(page.getByLabel("输入问题或关键词")).toHaveValue("继续追问草稿");
+  await expect(exchange.locator(".answer-markdown")).toContainText("稳定身份避免重复入库");
+  await expect
+    .poll(() =>
+      exchange
+        .locator("details.activity-details")
+        .evaluate((node) => (node as HTMLDetailsElement).open),
+    )
+    .toBe(false);
+  await expect(exchange.getByRole("link", { name: /稳定身份避免重复入库/ })).toBeVisible();
+  const composerBelowExchange = await exchange.evaluate((node) => {
+    const composer = document.querySelector(".home-composer");
+    return composer
+      ? Boolean(node.compareDocumentPosition(composer) & Node.DOCUMENT_POSITION_FOLLOWING)
+      : false;
+  });
+  expect(composerBelowExchange).toBe(true);
+  const activityBeforeAnswer = await exchange.locator(".activity-details").evaluate((activity) => {
+    const answer = activity.parentElement?.querySelector(".answer-content");
+    return answer
+      ? Boolean(activity.compareDocumentPosition(answer) & Node.DOCUMENT_POSITION_FOLLOWING)
+      : false;
+  });
+  expect(activityBeforeAnswer).toBe(true);
 });
 
 test("已删除产品入口不可访问且 listen 非法请求保持结构化错误", async ({ request }) => {
@@ -177,7 +262,7 @@ test("Codex 来源显示等待与未知格式，最终回答到达后自动发�
   await page.goto("/settings/tools");
   await expect(page.getByText("Codex（CLI / 桌面端）", { exact: true }).first()).toBeVisible();
   await expect(page.getByRole("heading", { name: "我的 Codex 来源" })).toBeVisible();
-  await page.goto("/");
+  await page.goto("/status");
   await expect(page.getByText("等待最终回答", { exact: false })).toBeVisible();
   await expect(page.getByText("不支持的会话格式", { exact: false })).toBeVisible();
   await page.screenshot({ path: testInfo.outputPath("codex-desktop.png"), fullPage: true });
@@ -192,7 +277,7 @@ test("Codex 来源显示等待与未知格式，最终回答到达后自动发�
   await request.post("/api/listen/scan");
   await replayQueue(request);
   await page.goto("/memory");
-  await expect(page.getByRole("link", { name: "查看记忆：Codex 最终对话验收" })).toBeVisible();
+  await expect(page.getByRole("button", { name: /Codex 最终对话验收/ })).toBeVisible();
   expect(diagnostics).toEqual([]);
 });
 
@@ -222,9 +307,9 @@ test("模型故障仍自动保存原文，Embedding 关闭配置保留", async (
   const waiting = await (await request.get("/api/config/tool-sources/status")).json();
   expect(waiting.events.waiting_dependency).toBe(0);
   await page.goto("/memory");
-  await expect(page.getByRole("link", { name: "查看记忆：等待服务专用候选" })).toBeVisible();
-  await page.goto("/");
-  await expect(page.getByText("无需人工审核", { exact: false })).toBeVisible();
+  await expect(page.getByRole("button", { name: /等待服务专用候选/ })).toBeVisible();
+  await page.goto("/status");
+  await expect(page.getByRole("heading", { name: "运行状态" })).toBeVisible();
   await expect(page.getByText("等待模型服务", { exact: true }).first()).toBeVisible();
   await page.screenshot({ path: testInfo.outputPath("ka003-waiting-desktop.png"), fullPage: true });
   await page.setViewportSize({ width: 390, height: 844 });

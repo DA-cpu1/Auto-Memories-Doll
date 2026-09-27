@@ -30,6 +30,36 @@ export const listenStatusAgentSchema = z.object({
   progress: z.array(z.unknown()),
 });
 
+export const failedTaskRetryRequestSchema = z.object({
+  eventId: z.string().min(1).max(256),
+});
+
+export const failedTasksResponseSchema = z.object({
+  success: z.literal(true),
+  data: z.object({
+    items: z.array(
+      z.object({
+        eventId: z.string(),
+        memoryId: z.string(),
+        sourceId: z.string().optional(),
+        sourceType: z.string(),
+        createdAt: z.string(),
+        retryCount: z.number().int().nonnegative(),
+        errorCode: z.string().optional(),
+        error: z.string().optional(),
+      }),
+    ),
+    total: z.number().int().nonnegative(),
+    page: z.number().int().positive(),
+    pageSize: z.number().int().positive(),
+  }),
+});
+
+export const failedTaskRetryResponseSchema = z.object({
+  success: z.literal(true),
+  data: z.object({ eventId: z.string(), status: z.literal("pending") }),
+});
+
 export type ApiRouteContract = {
   requestSchema?: string;
   responseSchema: string;
@@ -131,6 +161,15 @@ export const apiRouteContracts: Record<string, ApiRouteContract> = {
     requestSchema: "askRequestSchema",
     responseSchema: "askStreamResponseSchema",
     errorCodes: ["INVALID_JSON", "VALIDATION_FAILED", "INTERNAL_ERROR"],
+  },
+  "src/app/api/status/failures/route.ts": {
+    responseSchema: "failedTasksResponseSchema",
+    errorCodes: ["VALIDATION_FAILED", "INTERNAL_ERROR"],
+  },
+  "src/app/api/status/failures/retry/route.ts": {
+    requestSchema: "failedTaskRetryRequestSchema",
+    responseSchema: "failedTaskRetryResponseSchema",
+    errorCodes: ["INVALID_JSON", "VALIDATION_FAILED", "NOT_FOUND", "INTERNAL_ERROR"],
   },
 };
 

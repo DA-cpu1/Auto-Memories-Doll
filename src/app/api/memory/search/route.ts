@@ -15,6 +15,7 @@ export async function GET(request: NextRequest) {
   const { searchParams } = new URL(request.url);
   const query = searchParams.get("q");
   const category = searchParams.get("category");
+  const topic = searchParams.get("topic")?.trim();
   const limit = Math.min(50, Math.max(1, parseInt(searchParams.get("limit") || "10", 10)));
   // 可选相似度阈值：默认 0.3（与 VectorRetriever 默认一致），传 0 表示不过滤
   const threshold = Math.max(0, Math.min(1, parseFloat(searchParams.get("threshold") || "0.3")));
@@ -74,10 +75,14 @@ export async function GET(request: NextRequest) {
       }
     }
 
-    const memories = memoryService.getMemoriesByIds(candidateIds);
+    const memories = memoryService
+      .getMemoriesByIds(candidateIds)
+      .filter((memory) => !topic || memory.topic === topic);
     const memoryMap = new Map(memories.map((memory) => [memory.id, memory]));
     const ranked = new Ranker().rankWithMMR(
-      candidateIds.map((memoryId) => ({ memoryId, similarity: scores.get(memoryId) ?? 1 })),
+      candidateIds
+        .filter((memoryId) => memoryMap.has(memoryId))
+        .map((memoryId) => ({ memoryId, similarity: scores.get(memoryId) ?? 1 })),
       memoryMap,
     );
     const formattedResults = ranked.slice(0, limit).flatMap((rankedResult) => {

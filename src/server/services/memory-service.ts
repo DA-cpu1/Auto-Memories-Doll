@@ -11,6 +11,17 @@ import { logger } from "../../lib/logger";
 import { assertPendingEventStatusTransition } from "../../features/agent/state-machine";
 import Database from "better-sqlite3";
 
+export type FailedTaskSummary = {
+  eventId: string;
+  memoryId: string;
+  sourceId?: string;
+  sourceType: PendingEvent["sourceType"];
+  createdAt: string;
+  retryCount: number;
+  errorCode?: string;
+  error?: string;
+};
+
 /** 安全 JSON 解析：损坏数据不崩溃，返回兜底值并记录日志 */
 function safeJsonParse<T>(raw: string, fallback: T, context: string): T {
   try {
@@ -825,6 +836,63 @@ export class MemoryService {
       decisionReason: row.decisionReason || undefined,
       dependency: row.dependency ? JSON.parse(row.dependency) : undefined,
     }));
+  }
+
+  /** 仅返回状态页需要的字段，避免把候选内容暴露给浏览器。 */
+  listFailedTasks(page: number, pageSize: number): { items: FailedTaskSummary[]; total: number } {
+    const total = (
+      this.db
+        .prepare("SELECT COUNT(*) AS total FROM pending_events WHERE status = 'failed'")
+        .get() as {
+        total: number;
+      }
+    ).total;
+    const rows = this.db
+      .prepare(
+        `SELECT eventId, memoryId, sourceId, sourceType, createdAt, retryCount,
+                decisionReasonCode AS errorCode, decisionReason AS error
+         FROM pending_events WHERE status = 'failed'
+         ORDER BY createdAt DESC, eventId DESC LIMIT ? OFFSET ?`,
+      )
+      .all(pageSize, (page - 1) * pageSize) as Array<{
+      eventId: string;
+      memoryId: string;
+      sourceId: string | null;
+      sourceType: PendingEvent["sourceType"];
+      createdAt: string;
+      retryCount: number;
+      errorCode: string | null;
+      error: string | null;
+    }>;
+    return {
+      total,
+      items: rows.map((row) => ({
+        eventId: row.eventId,
+        memoryId: row.memoryId,
+        sourceId: row.sourceId || undefined,
+        sourceType: row.sourceType,
+        createdAt: row.createdAt,
+        retryCount: row.retryCount,
+        errorCode: row.errorCode || undefined,
+        error: row.error || undefined,
+      })),
+    };
+  }
+
+  /** 人工确认后重开已耗尽自动重试的失败任务；条件更新防止重复点击入队。 */
+  retryFailedTask(eventId: string): "queued" | "not_found" | "not_ready" {
+    const row = this.db
+      .prepare("SELECT status, retryCount FROM pending_events WHERE eventId = ?")
+      .get(eventId) as { status: PendingEvent["status"]; retryCount: number } | undefined;
+    if (!row) return "not_found";
+    if (row.status !== "failed" || row.retryCount < 3) return "not_ready";
+    const result = this.db
+      .prepare(
+        `UPDATE pending_events SET status = 'pending', retryCount = 0
+         WHERE eventId = ? AND status = 'failed' AND retryCount >= 3`,
+      )
+      .run(eventId);
+    return result.changes === 1 ? "queued" : "not_ready";
   }
 
   /** Automatically resumes legacy review events after manual review removal. */

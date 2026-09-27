@@ -38,7 +38,7 @@ export default function MemoryMapPage() {
   };
 
   return (
-    <div className="relative h-[calc(100vh-56px)] min-h-[620px] overflow-hidden bg-background-warm grain-overlay">
+    <div className="knowledge-map-page relative h-[calc(100dvh-68px)] min-h-[560px] overflow-hidden bg-background-warm">
       <MemoryMapViewport
         memories={memories}
         loading={loading}

@@ -120,33 +120,25 @@ export default function TopicGuidePage() {
   }
 
   return (
-    <div className="mx-auto w-full max-w-7xl px-4 py-6 sm:px-6 sm:py-10">
-      <nav
-        aria-label="面包屑"
-        className="mb-6 flex flex-wrap items-center gap-2 text-sm text-text-tertiary"
-      >
+    <div className="page-frame topic-page">
+      <nav aria-label="面包屑" className="topic-breadcrumb">
         <Link href="/memory" className="hover:text-accent">
           检索库
         </Link>
         <span aria-hidden="true">/</span>
         <span aria-current="page">{guide.title}</span>
       </nav>
-      <header className="border-b border-border pb-7">
+      <header className="topic-heading">
         <div className="flex flex-col gap-5 sm:flex-row sm:items-end sm:justify-between">
           <div className="min-w-0">
-            <p className="mb-2 font-mono text-xs font-semibold uppercase text-text-tertiary">
-              Topic dossier
-            </p>
-            <h1 className="break-words text-3xl font-bold text-text-primary sm:text-4xl">
-              {guide.title}
-            </h1>
-            <p className="mt-3 text-sm text-text-secondary">
+            <h1 className="break-words">{guide.title}</h1>
+            <p className="topic-counts">
               {guide.sections.length} 个章节 · {guide.memoryIds.length} 条知识 ·{" "}
               {guide.sourceVersions.length} 个来源版本
             </p>
           </div>
           <div className="flex shrink-0 flex-wrap gap-2">
-            <span className="status-tag status-tag--success self-center">
+            <span className="status-tag status-tag--loading self-center">
               {guide.modelAssisted ? "模型辅助编排" : "确定性编排"}
             </span>
             <button
@@ -161,46 +153,32 @@ export default function TopicGuidePage() {
         </div>
       </header>
 
-      <div className="mt-8 grid min-w-0 gap-8 lg:grid-cols-[220px_minmax(0,1fr)]">
+      <div className="topic-layout">
         <aside className="min-w-0 lg:sticky lg:top-20 lg:self-start">
-          <h2 className="mb-3 text-xs font-semibold uppercase text-text-tertiary">大纲</h2>
-          <nav aria-label="主题资料大纲" className="border-l border-border">
+          <h2 className="topic-outline-title">大纲</h2>
+          <nav aria-label="主题资料大纲" className="topic-outline">
             {guide.outline.map((item, index) => (
-              <a
-                key={item.sectionId}
-                href={`#${item.sectionId}`}
-                className="block border-l-2 border-transparent px-4 py-2 text-sm text-text-secondary hover:border-accent hover:text-accent"
-              >
-                <span className="mr-2 font-mono text-xs text-text-tertiary">
-                  {String(index + 1).padStart(2, "0")}
-                </span>
+              <a key={item.sectionId} href={`#${item.sectionId}`} className="topic-outline-link">
+                <span className="topic-outline-number">{String(index + 1).padStart(2, "0")}</span>
                 {item.title}
               </a>
             ))}
           </nav>
         </aside>
 
-        <main className="min-w-0">
-          <div className="divide-y divide-border border-y border-border">
+        <div className="min-w-0">
+          <div className="topic-sections">
             {guide.sections.map((section, index) => (
-              <section
-                key={section.id}
-                id={section.id}
-                className="scroll-mt-24 py-8 first:pt-0 sm:py-10"
-              >
-                <div className="mb-5 flex items-baseline gap-3">
-                  <span className="font-mono text-xs font-semibold text-accent">
-                    {String(index + 1).padStart(2, "0")}
-                  </span>
-                  <h2 className="text-xl font-bold text-text-primary sm:text-2xl">
-                    {section.title}
-                  </h2>
+              <section key={section.id} id={section.id} className="topic-section scroll-mt-24">
+                <div className="topic-section-heading">
+                  <span className="topic-section-number">{String(index + 1).padStart(2, "0")}</span>
+                  <h2>{section.title}</h2>
                 </div>
-                <div className="prose max-w-none break-words text-text-secondary">
+                <div className="topic-prose break-words">
                   <Markdown content={section.content} />
                 </div>
-                <div className="mt-6 border-l-2 border-accent-line pl-4">
-                  <p className="mb-2 text-xs font-semibold text-text-tertiary">本节依据</p>
+                <div className="topic-evidence">
+                  <p>本节依据</p>
                   <div className="flex flex-wrap gap-2">
                     {section.memoryIds.map((memoryId) => {
                       const memory = memoryById.get(memoryId);
@@ -208,7 +186,7 @@ export default function TopicGuidePage() {
                         <Link
                           key={memoryId}
                           href={memoryDetailHref(memoryId)}
-                          className="tag max-w-full hover:border-accent hover:text-accent"
+                          className="tag max-w-full"
                         >
                           <span className="truncate">
                             {memory?.titleZh || memory?.title || memoryId}
@@ -222,54 +200,43 @@ export default function TopicGuidePage() {
             ))}
           </div>
 
-          <section aria-labelledby="sources-heading" className="mt-10">
-            <div className="mb-4 flex flex-wrap items-end justify-between gap-3">
+          <section aria-labelledby="sources-heading" className="topic-sources">
+            <div className="topic-sources-heading">
               <div>
-                <p className="mb-1 font-mono text-xs uppercase text-text-tertiary">
-                  Provenance ledger
-                </p>
-                <h2 id="sources-heading" className="text-xl font-bold text-text-primary">
-                  来源版本
-                </h2>
+                <h2 id="sources-heading">来源版本</h2>
               </div>
-              <time className="text-xs text-text-tertiary" dateTime={guide.generatedAt}>
+              <time dateTime={guide.generatedAt}>
                 生成于 {new Date(guide.generatedAt).toLocaleString("zh-CN")}
               </time>
             </div>
-            <div className="overflow-x-auto border-y border-border">
-              <table className="w-full min-w-[640px] text-left text-sm">
-                <thead className="bg-muted text-xs text-text-tertiary">
+            <div className="table-scroll">
+              <table className="status-table topic-source-table">
+                <thead>
                   <tr>
-                    <th className="px-3 py-3 font-medium">来源</th>
-                    <th className="px-3 py-3 font-medium">类型</th>
-                    <th className="px-3 py-3 font-medium">版本</th>
-                    <th className="px-3 py-3 font-medium">采集时间</th>
-                    <th className="px-3 py-3 font-medium">知识数</th>
+                    <th>来源</th>
+                    <th>类型</th>
+                    <th>版本</th>
+                    <th>采集时间</th>
+                    <th>知识数</th>
                   </tr>
                 </thead>
-                <tbody className="divide-y divide-border">
+                <tbody>
                   {guide.sourceVersions.map((source) => (
                     <tr key={`${source.sourceId}:${source.revision}`}>
-                      <td className="max-w-[280px] break-all px-3 py-3 text-text-primary">
+                      <td className="max-w-[280px] break-all">
                         {source.sourcePath || source.sourceId}
                       </td>
-                      <td className="px-3 py-3 text-text-secondary">{source.sourceType}</td>
-                      <td className="px-3 py-3 font-mono text-xs text-text-secondary">
-                        {source.revision.slice(0, 12)}
-                      </td>
-                      <td className="px-3 py-3 text-text-secondary">
-                        {new Date(source.capturedAt).toLocaleString("zh-CN")}
-                      </td>
-                      <td className="px-3 py-3 font-mono text-text-secondary">
-                        {source.memoryIds.length}
-                      </td>
+                      <td>{source.sourceType}</td>
+                      <td className="revision-cell">{source.revision.slice(0, 12)}</td>
+                      <td>{new Date(source.capturedAt).toLocaleString("zh-CN")}</td>
+                      <td className="revision-cell">{source.memoryIds.length}</td>
                     </tr>
                   ))}
                 </tbody>
               </table>
             </div>
           </section>
-        </main>
+        </div>
       </div>
     </div>
   );
@@ -285,13 +252,10 @@ function PageNotice({
   children?: React.ReactNode;
 }) {
   return (
-    <main className="mx-auto flex min-h-[65vh] max-w-xl flex-col items-center justify-center px-5 text-center">
-      <p className="mb-3 font-mono text-xs font-semibold uppercase text-text-tertiary">
-        Topic dossier
-      </p>
-      <h1 className="text-2xl font-bold text-text-primary">{title}</h1>
-      <p className="mt-3 text-sm leading-6 text-text-secondary">{detail}</p>
+    <div className="topic-page-notice">
+      <h1>{title}</h1>
+      <p>{detail}</p>
       {children ? <div className="mt-6 space-y-3">{children}</div> : null}
-    </main>
+    </div>
   );
 }

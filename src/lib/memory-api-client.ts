@@ -33,6 +33,7 @@ export async function listMemoriesClient(
 export async function searchMemoriesClient(
   query: string,
   limit = 10,
+  topic?: string,
 ): Promise<MemorySearchResponse> {
   const trimmedQuery = query.trim();
   if (!trimmedQuery) {
@@ -40,8 +41,9 @@ export async function searchMemoriesClient(
   }
 
   const safeLimit = Math.min(50, Math.max(1, Math.trunc(limit)));
+  const topicParam = topic?.trim() ? `&topic=${encodeURIComponent(topic.trim())}` : "";
   const response = await requestApi<MemorySearchResponse>(
-    `/api/memory/search?q=${encodeURIComponent(trimmedQuery)}&limit=${safeLimit}`,
+    `/api/memory/search?q=${encodeURIComponent(trimmedQuery)}&limit=${safeLimit}${topicParam}`,
   );
   return response.data;
 }
