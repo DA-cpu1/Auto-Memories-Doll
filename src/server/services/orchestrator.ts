@@ -771,15 +771,15 @@ export class Orchestrator {
   /** 重试失败事件：将 retryCount < 3 的失败事件重置为 pending。供 AuditWorker 调用。 */
   retryFailedEvents(): number {
     const memory = this.memoryService;
-    // 导出接口：listPendingEvents 返回完整列表供重试用
-    const pending = memory.getEventsByStatus("failed", dependencyConfig.batchSize);
+    const pending = memory.getRetryableFailedEvents(
+      dependencyConfig.batchSize,
+      dependencyConfig.retryDelaysMs.length,
+    );
     let retried = 0;
 
     for (const event of pending) {
-      if (event.status === "failed" && event.retryCount < 3) {
-        memory.updateEvent({ ...event, status: "pending" });
-        retried++;
-      }
+      memory.updateEvent({ ...event, status: "pending" });
+      retried++;
     }
     return retried;
   }

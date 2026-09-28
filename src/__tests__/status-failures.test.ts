@@ -3,6 +3,8 @@ import { mkdirSync, rmSync } from "node:fs";
 import { closeDatabase } from "../lib/storage/database";
 import { invalidatePathCache } from "../lib/storage/path-resolver";
 import { MemoryService } from "../server/services/memory-service";
+import { POST as retryFailedTaskRoute } from "../app/api/status/failures/retry/route";
+import { NextRequest } from "next/server";
 import type { PendingEvent } from "../types/memory";
 
 const root = process.env.MEMORY_ROOT!;
@@ -56,5 +58,50 @@ describe.sequential("status failure tasks", () => {
     expect(service.retryFailedTask("event-02")).toBe("not_ready");
     expect(service.getEvent("event-02")).toMatchObject({ status: "pending", retryCount: 0 });
     service.close();
+  });
+
+  it("selects retryable failures before applying the batch limit", () => {
+    const service = new MemoryService();
+    for (let index = 1; index <= 20; index++) {
+      service.enqueueEvent(failedEvent(`event-${String(index).padStart(2, "0")}`, 3));
+    }
+    for (let index = 21; index <= 36; index++) {
+      service.enqueueEvent(failedEvent(`event-${index}`, index === 36 ? 2 : 1));
+    }
+
+    const retryable = service.getRetryableFailedEvents(20, 3);
+    expect(retryable).toHaveLength(16);
+    expect(retryable.map((event) => event.eventId)).toEqual(
+      Array.from({ length: 16 }, (_, index) => `event-${index + 21}`),
+    );
+    service.close();
+  });
+
+  it("accepts the browser origin from Host when Next.js normalizes the URL hostname", async () => {
+    const request = new NextRequest("http://localhost:3000/api/status/failures/retry", {
+      method: "POST",
+      headers: {
+        Host: "127.0.0.1:3000",
+        Origin: "http://127.0.0.1:3000",
+        "Content-Type": "application/json",
+      },
+      body: "{}",
+    });
+    const response = await retryFailedTaskRoute(request);
+    expect(response.status).toBe(400);
+  });
+
+  it("rejects a different browser origin", async () => {
+    const request = new NextRequest("http://localhost:3000/api/status/failures/retry", {
+      method: "POST",
+      headers: {
+        Host: "127.0.0.1:3000",
+        Origin: "http://other.example",
+        "Content-Type": "application/json",
+      },
+      body: "{}",
+    });
+    const response = await retryFailedTaskRoute(request);
+    expect(response.status).toBe(403);
   });
 });

@@ -7,7 +7,21 @@ import { logger } from "../../../../../lib/logger";
 
 export async function POST(request: NextRequest) {
   const origin = request.headers.get("origin");
-  if (origin && origin !== request.nextUrl.origin) {
+  const host = request.headers.get("host");
+  let sameOrigin = !origin;
+  if (origin && host) {
+    try {
+      const parsedOrigin = new URL(origin);
+      // Next.js may normalize nextUrl.hostname to localhost for a 127.0.0.1 request.
+      sameOrigin =
+        parsedOrigin.origin === origin &&
+        parsedOrigin.protocol === request.nextUrl.protocol &&
+        parsedOrigin.host.toLowerCase() === host.toLowerCase();
+    } catch {
+      sameOrigin = false;
+    }
+  }
+  if (!sameOrigin) {
     return NextResponse.json(apiError(ErrorCode.VALIDATION_FAILED, "仅允许从当前页面重试任务"), {
       status: 403,
     });

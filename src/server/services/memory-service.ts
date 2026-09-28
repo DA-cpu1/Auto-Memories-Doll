@@ -838,6 +838,39 @@ export class MemoryService {
     }));
   }
 
+  /** 在 LIMIT 前排除已耗尽自动重试次数的事件，避免旧失败任务挡住后续任务。 */
+  getRetryableFailedEvents(limit: number, maxRetryCount: number): PendingEvent[] {
+    const rows = this.db
+      .prepare(
+        `SELECT * FROM pending_events
+         WHERE status = 'failed' AND retryCount < ?
+         ORDER BY createdAt ASC, eventId ASC LIMIT ?`,
+      )
+      .all(maxRetryCount, limit) as any[];
+
+    return rows.map((row) => ({
+      eventId: row.eventId,
+      memoryId: row.memoryId,
+      sourceEventId: row.sourceEventId || undefined,
+      sourceId: row.sourceId || undefined,
+      sourceRevision: row.sourceRevision || undefined,
+      sourceType: row.sourceType as PendingEvent["sourceType"],
+      eventType: (row.eventType || undefined) as PendingEvent["eventType"],
+      candidate: row.candidate,
+      changedFields: safeJsonParse(
+        row.changedFields,
+        [] as string[],
+        `event ${row.eventId} changedFields`,
+      ),
+      createdAt: row.createdAt,
+      status: row.status as PendingEvent["status"],
+      retryCount: row.retryCount,
+      decisionReasonCode: row.decisionReasonCode || undefined,
+      decisionReason: row.decisionReason || undefined,
+      dependency: row.dependency ? JSON.parse(row.dependency) : undefined,
+    }));
+  }
+
   /** 仅返回状态页需要的字段，避免把候选内容暴露给浏览器。 */
   listFailedTasks(page: number, pageSize: number): { items: FailedTaskSummary[]; total: number } {
     const total = (
