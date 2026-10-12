@@ -21,9 +21,12 @@ describe("configuration API request validation", () => {
     const response = await getAiConfig();
     const body = await response.json();
 
-    // providers.json 已置空（不预设用户环境不存在的模型），目录必须是对象结构且可自由扩展
+    // 目录经 providers.json 声明式注册（当前含 joyehuang 免费端点），结构可自由扩展
     expect(body.providerCatalog).toHaveProperty("providers");
-    expect(body.providerCatalog.providers).toEqual({});
+    expect(body.providerCatalog.providers.joyehuang).toEqual({
+      baseURL: "https://api.joyehuang.dev/v1",
+      models: { "gpt-6.1-sol": { type: "chat" } },
+    });
   });
 
   it("accepts provider IDs declared in providers.json without code changes", async () => {

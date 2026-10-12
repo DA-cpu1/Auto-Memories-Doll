@@ -1,4 +1,29 @@
 {
   "$schema": "./providers.schema.json",
-  "providers": {}
+  "providers": {
+    "joyehuang": {
+      "baseURL": "https://api.joyehuang.dev/v1",
+      "models": {
+        "gpt-6.1-sol": {
+          "type": "chat"
+        }
+      }
+    },
+    "zhipu": {
+      "baseURL": "https://open.bigmodel.cn/api/paas/v4",
+      "models": {
+        "glm-4.5": { "type": "chat" },
+        "glm-4.5-air": { "type": "chat" },
+        "glm-4.6": { "type": "chat" },
+        "glm-4.7": { "type": "chat" },
+        "glm-5": { "type": "chat" },
+        "glm-5-turbo": { "type": "chat" },
+        "glm-5.1": { "type": "chat" },
+        "glm-5.2": { "type": "chat" },
+        "glm-5.3": { "type": "chat" },
+        "glm-5.3-flash": { "type": "chat" },
+        "glm-5.3-flashx": { "type": "chat" }
+      }
+    }
+  }
 }
