@@ -29,7 +29,7 @@ docs/*
 !docs/specs/
 !docs/specs/**
 # Personal resume exports and interview study materials
-/output/pdf/resume/
+/output/pdf/
 notes/
 docs-zh/.obsidian/workspace.json
 *.private.md
